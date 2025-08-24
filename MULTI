@@ -1,0 +1,24 @@
+/import React from 'react';
+import Sidebar from './Sidebar';
+
+const AppSidebar = () => {
+return (
+  <div>
+    <Sidebar
+      collapsible="offcanvas"
+      className="bg-[linear-gradient(180deg,#0c1220_0%,#0b1020_40%,#0a0f1a_100%)] text-white"
+      style={
+        {
+          "--sidebar-width": "18rem",
+          "--sidebar-width-icon": "3.5rem",
+        } as React.CSSProperties
+      }
+    >
+      {/* Sidebar content here */}
+    </Sidebar>
+    {/* rest of code here */}
+  </div>
+);
+};
+
+export default AppSidebar;

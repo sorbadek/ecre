@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "canisters": {
+    "user_profile": {
+      "type": "motoko",
+      "main": "user-profile/main.mo"
+    },
+    "learning_analytics": {
+      "type": "motoko",
+      "main": "learning-analytics/main.mo"
+    },
+    "notifications": {
+      "type": "motoko",
+      "main": "notifications/main.mo"
+    },
+    "social": {
+      "type": "motoko",
+      "main": "social/main.mo"
+    },
+    "recommendations": {
+      "type": "motoko",
+      "main": "recommendations/main.mo"
+    },
+    "sessions": {
+      "type": "motoko",
+      "main": "sessions/main.mo"
+    },
+    "peerverse_frontend": {
+      "type": "assets",
+      "source": ["../dist"]
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:4943",
+      "type": "ephemeral"
+    },
+    "ic": {
+      "providers": ["https://ic0.app"],
+      "type": "persistent"
+    }
+  }
+}

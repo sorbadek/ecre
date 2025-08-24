@@ -1,0 +1,55 @@
+// Version: 1.0.0
+type UserFile =
+  {
+    category : Text;
+    contentType : Text;
+    filename : Text;
+    id : Text;
+    size : Nat;
+    tags : [Text];
+    uploadedAt : Int;
+    url : Text
+  };
+type UserProfile =
+  {
+    avatarUrl : Text;
+    bio : Text;
+    coverUrl : Text;
+    createdAt : Int;
+    email : Text;
+    files : [UserFile];
+    id : Principal;
+    interests : [Text];
+    name : Text;
+    reputation : Nat;
+    settings : UserSettings;
+    socialLinks : [(Text, Text)];
+    updatedAt : Int;
+    xpBalance : Nat
+  };
+type UserSettings =
+  {
+    emailNotifications : Bool;
+    language : Text;
+    notifications : Bool;
+    privacy : Text;
+    profileVisibility : Text;
+    theme : Text
+  };
+type XPTransaction =
+  {
+    amount : Int;
+    id : Text;
+    metadata : Text;
+    reason : Text;
+    source : Text;
+    timestamp : Int;
+    userId : Principal
+  };
+actor {
+  stable var nextFileId : Nat;
+  stable var nextTransactionId : Nat;
+  stable var profileEntries : [(Principal, UserProfile)];
+  stable var userFileEntries : [(Text, UserFile)];
+  stable var xpTransactionEntries : [(Text, XPTransaction)]
+};

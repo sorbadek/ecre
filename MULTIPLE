@@ -1,0 +1,36 @@
+// components/ui/sidebar.tsx
+const SIDEBAR_COOKIE_NAME = "sidebar:state"
+const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+const SIDEBAR_WIDTH = "18rem"
+const SIDEBAR_WIDTH_MOBILE = "20rem"
+const SIDEBAR_WIDTH_ICON = "4rem"
+const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+
+// app/dashboard/layout.tsx
+import type { ReactNode } from "react"
+import { cookies } from "next/headers"
+import AppSidebar from "@/components/app-sidebar"
+import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
+import WatermarkBackground from "@/components/watermark-bg"
+
+export default async function DashboardLayout({ children }: { children: ReactNode }) {
+const cookieStore = await cookies()
+const cookieVal = cookieStore.get("sidebar:state")?.value
+// Default to expanded when no cookie is present
+const defaultOpen = cookieVal === undefined ? true : cookieVal === "true"
+
+return (
+  <SidebarProvider defaultOpen={defaultOpen}>
+    <AppSidebar />
+    <SidebarInset>
+      <header className="flex h-12 items-center gap-2 border-b px-4">
+        <SidebarTrigger />
+        <span className="text-sm text-muted-foreground">Dashboard</span>
+      </header>
+      <WatermarkBackground className="min-h-[calc(100svh-3rem)] p-4 md:p-6">
+        {children}
+      </WatermarkBackground>
+    </SidebarInset>
+  </SidebarProvider>
+)
+}

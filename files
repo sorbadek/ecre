@@ -1,0 +1,67 @@
+/// components/app-sidebar.tsx
+import React from "react";
+import {
+Sidebar,
+SidebarContent,
+SidebarFooter,
+SidebarGroup,
+SidebarGroupAction,
+SidebarGroupContent,
+SidebarGroupLabel,
+SidebarHeader,
+SidebarInput,
+SidebarInset,
+SidebarMenu,
+SidebarMenuAction,
+SidebarMenuBadge,
+SidebarMenuButton,
+SidebarMenuItem,
+SidebarMenuSkeleton,
+SidebarMenuSub,
+SidebarMenuSubButton,
+SidebarMenuSubItem,
+SidebarProvider,
+SidebarRail,
+SidebarSeparator,
+SidebarTrigger
+} from "@/components/ui/sidebar";
+
+export default function AppSidebar() {
+return (
+  <Sidebar
+    collapsible="offcanvas"
+    className="bg-[linear-gradient(180deg,#0c1220_0%,#0b1020_40%,#0a0f1a_100%)] text-white"
+    style={
+      {
+        "--sidebar-width": "18rem",
+        "--sidebar-width-icon": "3.5rem",
+      } as React.CSSProperties
+    }
+  >
+    {/* Sidebar content here */}
+  </Sidebar>
+);
+}
+
+// app/dashboard/layout.tsx
+"use client"
+
+import type React from "react"
+import AppSidebar from "@/components/app-sidebar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+return (
+  <SidebarProvider defaultOpen className="h-svh w-full overflow-hidden">
+    {/* Fixed sidebar handled internally by shadcn/ui */}
+    <AppSidebar />
+    {/* Main content scrolls independently */}
+    <SidebarInset className="flex h-svh flex-1 flex-col bg-background overflow-hidden">
+      {/* Optional sticky header could go here */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="p-4 md:p-6">{children}</div>
+      </div>
+    </SidebarInset>
+  </SidebarProvider>
+)
+}

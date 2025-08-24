@@ -1,0 +1,120 @@
+type XPTransaction = 
+ record {
+   amount: int;
+   id: text;
+   metadata: text;
+   reason: text;
+   source: text;
+   timestamp: int;
+   userId: principal;
+ };
+type UserSettings = 
+ record {
+   emailNotifications: bool;
+   language: text;
+   notifications: bool;
+   privacy: text;
+   profileVisibility: text;
+   theme: text;
+ };
+type UserProfile = 
+ record {
+   avatarUrl: text;
+   bio: text;
+   coverUrl: text;
+   createdAt: int;
+   email: text;
+   files: vec UserFile;
+   id: principal;
+   interests: vec text;
+   name: text;
+   reputation: nat;
+   settings: UserSettings;
+   socialLinks: vec record {
+                      text;
+                      text;
+                    };
+   updatedAt: int;
+   xpBalance: nat;
+ };
+type UserFile = 
+ record {
+   category: text;
+   contentType: text;
+   filename: text;
+   id: text;
+   size: nat;
+   tags: vec text;
+   uploadedAt: int;
+   url: text;
+ };
+type Result_4 = 
+ variant {
+   err: text;
+   ok: vec UserFile;
+ };
+type Result_3 = 
+ variant {
+   err: text;
+   ok: bool;
+ };
+type Result_2 = 
+ variant {
+   err: text;
+   ok: nat;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: UserProfile;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: UserFile;
+ };
+type ProfileUpdate = 
+ record {
+   avatarUrl: opt text;
+   bio: opt text;
+   coverUrl: opt text;
+   email: opt text;
+   interests: opt vec text;
+   name: opt text;
+   settings: opt UserSettings;
+   socialLinks: opt vec record {
+                          text;
+                          text;
+                        };
+ };
+service : {
+  addSocialLink: (text, text) -> (Result_1);
+  addXP: (nat, text, text, text) -> (Result_2);
+  createProfile: (text, text) -> (Result_1);
+  deleteFile: (text) -> (Result_3);
+  getAllPublicProfiles: () -> (vec UserProfile) query;
+  getCanisterStats: () ->
+   (record {
+      totalFiles: nat;
+      totalTransactions: nat;
+      totalUsers: nat;
+      totalXPDistributed: int;
+    }) query;
+  getFilesByCategory: (text) -> (vec UserFile) query;
+  getMyFiles: () -> (vec UserFile) query;
+  getMyProfile: () -> (opt UserProfile) query;
+  getProfile: (principal) -> (opt UserProfile) query;
+  getTopUsersByXP: (nat) -> (vec UserProfile) query;
+  getTotalUsers: () -> (nat) query;
+  getTotalXPDistributed: () -> (int) query;
+  getXPBalance: () -> (nat) query;
+  getXPTransactions: () -> (vec XPTransaction) query;
+  linkFileToProfile: (text, text) -> (Result_4);
+  removeSocialLink: (text) -> (Result_1);
+  resetUserXP: (principal) -> (Result_3);
+  spendXP: (nat, text, text) -> (Result_2);
+  updateAvatar: (text) -> (Result_1);
+  updateCover: (text) -> (Result_1);
+  updateProfile: (ProfileUpdate) -> (Result_1);
+  uploadFile: (text, text, nat, text, text, vec text) -> (Result);
+}

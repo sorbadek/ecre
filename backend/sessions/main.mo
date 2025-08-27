@@ -127,11 +127,37 @@ actor Sessions {
         };
     };
 
+    // Update a single session's status by ID and return it
+    private func updateSessionStatusById(id: Text): ?Session {
+        switch (sessions.get(id)) {
+            case (?session) { ?updateSessionStatus(session) };
+            case null { null };
+        }
+    };
+
     private func generateMeetingUrl(sessionType: SessionType, sessionId: Text): Text {
-        switch (sessionType) {
+        let baseUrl = switch (sessionType) {
             case (#video) { "https://meet.jit.si/peerverse-video-" # sessionId };
             case (#voice) { "https://meet.jit.si/peerverse-voice-" # sessionId };
-        }
+        };
+        
+        // Add authentication and security parameters
+        let params = [
+            "config.prejoinPageEnabled=false",
+            "interfaceConfig.DISABLE_JOIN_LEAVE_NOTIFICATIONS=true",
+            "config.startWithAudioMuted=false",
+            "config.startWithVideoMuted=false",
+            "config.disableRemoteMute=true",
+            "config.requireDisplayName=true",
+            "config.enableNoisyMicDetection=false",
+            "config.enableClosePage=true",
+            "config.disableInviteFunctions=true",
+            "config.enableWelcomePage=false",
+            "config.enableUserRolesBasedOnToken=true"
+        ];
+        
+        let queryParams = Text.join("&", params.vals());
+        baseUrl # "?" # queryParams
     };
 
     private func addUserSession(user: Principal, sessionId: Text) {
@@ -207,6 +233,14 @@ actor Sessions {
         }
     };
 
+    // Get session with updated status
+    public shared(msg) func getSessionStatus(id: Text): async Result.Result<Session, Text> {
+        switch (updateSessionStatusById(id)) {
+            case (?session) { #ok(session) };
+            case null { #err("Session not found") };
+        }
+    };
+
     public shared(msg) func getMySessions(): async [Session] {
         let caller = msg.caller;
         switch (userSessions.get(caller)) {
@@ -223,43 +257,57 @@ actor Sessions {
     public shared(msg) func joinSession(sessionId: Text): async Result.Result<Session, Text> {
         let caller = msg.caller;
         
-        switch (sessions.get(sessionId)) {
-            case (?session) {
-                // Check if session is already completed or cancelled
-                switch (session.status) {
-                    case (#completed or #cancelled) {
-                        return #err("Cannot join a session that has been " # 
-                            (if (session.status == #completed) "completed" else "cancelled"));
-                    };
-                    case _ {};
-                };
-                
-                // Check if user is already in attendees
-                if (Array.find<Principal>(session.attendees, func(p) { p == caller }) != null) {
-                    return #ok(session); // Already joined
-                };
-                
-                // Check if there's space for more attendees
-                if (session.attendees.size() >= session.maxAttendees) {
-                    return #err("This session is already at maximum capacity");
-                };
-                
-                // Add user to attendees
-                let updatedSession = {
-                    session with
-                    attendees = Array.append<Principal>(session.attendees, [caller]);
-                    updatedAt = Time.now();
-                };
-                
-                sessions.put(sessionId, updatedSession);
-                addUserSession(caller, sessionId);
-                
-                #ok(updatedSession)
+        // First update the session status
+        let updatedSession = switch (updateSessionStatusById(sessionId)) {
+            case (?s) { s };
+            case null { return #err("Session not found") };
+        };
+        
+        // Check if session is already completed or cancelled
+        switch (updatedSession.status) {
+            case (#completed or #cancelled) {
+                return #err("Cannot join a session that has been " # 
+                    (if (updatedSession.status == #completed) "completed" else "cancelled"));
             };
-            case null {
-                #err("Session not found")
-            };
-        }
+            case _ {};
+        };
+        
+        let now = Time.now();
+        let startTime = updatedSession.scheduledTime;
+        let endTime = startTime + updatedSession.duration * 60_000_000_000; // Convert minutes to nanoseconds
+        let timeUntilStart = startTime - now;
+        let timeUntilEnd = endTime - now;
+        
+        // Allow joining up to 15 minutes before start and until end time
+        if (timeUntilStart > 15 * 60 * 1_000_000_000) {
+            return #err("This session hasn't started yet. Please come back closer to the start time.");
+        };
+        
+        if (timeUntilEnd <= 0) {
+            return #err("This session has already ended.");
+        };
+                
+        // Check if user is already in attendees
+        if (Array.find<Principal>(updatedSession.attendees, func(p) { p == caller }) != null) {
+            return #ok(updatedSession); // Already joined
+        };
+        
+        // Check if there's space for more attendees
+        if (updatedSession.attendees.size() >= updatedSession.maxAttendees) {
+            return #err("This session is already at maximum capacity");
+        };
+        
+        // Add user to attendees
+        let finalSession = {
+            updatedSession with
+            attendees = Array.append<Principal>(updatedSession.attendees, [caller]);
+            updatedAt = Time.now();
+        };
+        
+        sessions.put(sessionId, finalSession);
+        addUserSession(caller, sessionId);
+        
+        #ok(finalSession)
     };
 
     public shared(msg) func updateSession(input: UpdateSessionInput): async Result.Result<Session, Text> {

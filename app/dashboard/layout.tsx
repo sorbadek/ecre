@@ -4,8 +4,9 @@ import type { ReactNode } from "react"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import AppSidebar from "@/components/app-sidebar"
 import styles from "@/components/no-scrollbar.module.css"
+import { withAuth } from "@/components/auth/protected-route"
 
-export default function DashboardLayout({ children }: { children: ReactNode }) {
+function DashboardLayoutContent({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider defaultOpen>
       <div className="flex h-screen w-full overflow-hidden">
@@ -22,3 +23,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     </SidebarProvider>
   )
 }
+
+// Wrap the dashboard layout with authentication
+const DashboardLayout = withAuth(DashboardLayoutContent, {
+  redirectTo: '/',
+  requireAuth: true
+})
+
+export default DashboardLayout

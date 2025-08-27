@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -47,222 +47,208 @@ import {
   Cell,
 } from "recharts"
 import { XPPurchaseModal } from "@/components/xp-purchase-modal"
-import { learningAnalyticsClient } from "@/lib/learning-analytics-client"
 import { notificationsClient, type Activity } from "@/lib/notifications-client"
+import { useApiClients } from "@/lib/use-api-clients"
 import { socialClient, type PartnerProfile } from "@/lib/social-client"
+import { toast } from "sonner"
 
-// Sample data for charts
-const weeklyLearningData = [
-  { day: "Mon", hours: 2.5, xp: 120 },
-  { day: "Tue", hours: 3.2, xp: 180 },
-  { day: "Wed", hours: 1.8, xp: 90 },
-  { day: "Thu", hours: 4.1, xp: 220 },
-  { day: "Fri", hours: 2.9, xp: 150 },
-  { day: "Sat", hours: 5.2, xp: 280 },
-  { day: "Sun", hours: 3.8, xp: 200 },
-]
 
-const courseProgressData = [
-  { course: "Completed", value: 3, color: "#0ea5e9", percentage: 43 },
-  { course: "In Progress", value: 2, color: "#38bdf8", percentage: 29 },
-  { course: "Paused", value: 1, color: "#7dd3fc", percentage: 14 },
-  { course: "Not Started", value: 1, color: "#bae6fd", percentage: 14 },
-]
+interface ChartCourseProgress {
+  course: string;
+  value: number;
+  color: string;
+  percentage: number;
+}
+
+// To hold the detailed progress from the backend
+import { type CourseProgress } from "@/lib/learning-analytics-client";
 
 export default function DashboardPage() {
+    const { learningAnalyticsClient, isAuthenticated, loading: authLoading, clientsInitialized } = useApiClients()
   const [showXPModal, setShowXPModal] = useState(false)
-  const [weeklyData, setWeeklyData] = useState(weeklyLearningData)
-  const [courseProgress, setCourseProgress] = useState(courseProgressData)
+  const [weeklyData, setWeeklyData] = useState<any[]>([])
+    const [chartCourseProgress, setChartCourseProgress] = useState<ChartCourseProgress[]>([])
+  const [detailedCourseProgress, setDetailedCourseProgress] = useState<CourseProgress[]>([])
   const [activities, setActivities] = useState<Activity[]>([])
   const [partners, setPartners] = useState<PartnerProfile[]>([])
   const [loading, setLoading] = useState(true)
+  const [totalCourses, setTotalCourses] = useState(0)
 
-  useEffect(() => {
-    const loadDashboardData = async () => {
-      try {
-        setLoading(true)
+  // Show loading state while auth is initializing
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    )
+  }
 
-        // Load learning analytics
+  const loadDashboardData = useCallback(async () => {
+    if (!isAuthenticated) {
+      console.warn("User not authenticated, skipping dashboard data load");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Load learning analytics if client is available
+      if (learningAnalyticsClient) {
+        // Get weekly stats
         try {
-          const analytics = await learningAnalyticsClient.getWeeklyStats()
-          if (analytics && analytics.dailyHours) {
-            const chartData = analytics.dailyHours.map((hours, index) => {
-              // Convert BigInt to number if needed
+          const analytics = await learningAnalyticsClient.getWeeklyStats();
+          if (analytics && Array.isArray(analytics.dailyHours)) {
+            const chartData = analytics.dailyHours.map((hours: number | bigint, index: number) => {
               const hoursNum = typeof hours === 'bigint' ? Number(hours) : hours;
               return {
-                day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index],
+                day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index % 7],
                 hours: hoursNum,
-                xp: Math.round(hoursNum * 50), // Approximate XP calculation
+                xp: Math.round(hoursNum * 50),
               };
-            })
-            setWeeklyData(chartData)
+            });
+            setWeeklyData(chartData);
           }
         } catch (error) {
-          console.warn("Using fallback learning data:", error)
+          console.warn("Error loading weekly stats:", error);
+          setWeeklyData([]); // Clear data on error
         }
 
+        // Get course stats
         try {
-          const progress = await learningAnalyticsClient.getCourseStats()
-          if (progress) {
-            // Convert BigInt to number if needed
-            const completed = typeof progress.completed === 'bigint' ? Number(progress.completed) : progress.completed;
-            const inProgress = typeof progress.inProgress === 'bigint' ? Number(progress.inProgress) : progress.inProgress;
-            const paused = typeof progress.paused === 'bigint' ? Number(progress.paused) : progress.paused;
-            const notStarted = typeof progress.notStarted === 'bigint' ? Number(progress.notStarted) : progress.notStarted;
-            const totalCourses = typeof progress.totalCourses === 'bigint' ? Number(progress.totalCourses) : progress.totalCourses;
+          const stats = await learningAnalyticsClient.getCourseStats();
+          if (stats) {
+            const completed = Number(stats.completed) || 0;
+            const inProgress = Number(stats.inProgress) || 0;
+            const paused = Number(stats.paused) || 0;
+            const notStarted = Number(stats.notStarted) || 0;
+            const total = completed + inProgress + paused + notStarted;
+            const totalCourses = Math.max(1, total);
+            setTotalCourses(total);
 
-            const progressData = [
+            const progressData: ChartCourseProgress[] = [
               {
                 course: "Completed",
                 value: completed,
                 color: "#0ea5e9",
-                percentage: totalCourses > 0 ? Math.round((completed / totalCourses) * 100) : 0,
+                percentage: Math.round((completed / totalCourses) * 100),
               },
               {
                 course: "In Progress",
                 value: inProgress,
                 color: "#38bdf8",
-                percentage: totalCourses > 0 ? Math.round((inProgress / totalCourses) * 100) : 0,
+                percentage: Math.round((inProgress / totalCourses) * 100),
               },
               {
                 course: "Paused",
                 value: paused,
                 color: "#7dd3fc",
-                percentage: totalCourses > 0 ? Math.round((paused / totalCourses) * 100) : 0,
+                percentage: Math.round((paused / totalCourses) * 100),
               },
               {
                 course: "Not Started",
                 value: notStarted,
                 color: "#bae6fd",
-                percentage: totalCourses > 0 ? Math.round((notStarted / totalCourses) * 100) : 0,
+                percentage: Math.round((notStarted / totalCourses) * 100),
               },
-            ]
-            setCourseProgress(progressData)
+            ];
+            setChartCourseProgress(progressData);
           }
         } catch (error) {
-          console.warn("Using fallback course progress:", error)
+                    console.warn("Error loading course stats:", error);
+          setChartCourseProgress([]); // Clear data on error
         }
 
-        // Load activities
+        // Get detailed course progress for XP
         try {
-          const userActivities = await notificationsClient.getMyActivities(5)
-          setActivities(userActivities)
+          const detailedProgressData = await learningAnalyticsClient.getMyCourseProgress();
+          if (detailedProgressData) {
+            setDetailedCourseProgress(detailedProgressData);
+          }
         } catch (error) {
-          console.warn("Using fallback activities:", error)
+          console.warn("Failed to load detailed course progress:", error);
+          setDetailedCourseProgress([]);
         }
 
-        // Load learning partners
+        // Get learning partners
         try {
-          const userPartners = await socialClient.getMyPartners()
-          setPartners(userPartners.slice(0, 5)) // Show only first 5
+          console.log('Fetching learning partners...');
+          const partnersData = await socialClient.getMyPartners();
+          console.log('Received partners data:', partnersData);
+          if (partnersData && Array.isArray(partnersData)) {
+            setPartners(partnersData);
+          } else {
+            console.warn('Invalid partners data format:', partnersData);
+            setPartners([]);
+          }
         } catch (error) {
-          console.warn("Using fallback partners:", error)
+          console.error("Failed to load learning partners:", error);
+          toast.error("Failed to load learning partners");
+          setPartners([]);
         }
-      } catch (error) {
-        console.error("Error loading dashboard data:", error)
-      } finally {
-        setLoading(false)
-      }
-    }
 
-    loadDashboardData()
-  }, [])
-
-  const generateSampleData = async () => {
-    try {
-      setLoading(true)
-
-      // Generate sample data for all services
-      await Promise.all([
-        learningAnalyticsClient.generateSampleData().catch(console.warn),
-        notificationsClient.generateSampleActivities().catch(console.warn),
-        socialClient.generateSamplePartners().catch(console.warn),
-      ])
-
-      // Reload the data
-      try {
-        const analytics = await learningAnalyticsClient.getWeeklyStats()
-        if (analytics && analytics.dailyHours) {
-          const chartData = analytics.dailyHours.map((hours, index) => ({
-            day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index],
-            hours,
-            xp: Math.round(hours * 50),
-          }))
-          setWeeklyData(chartData)
+        // Get recent activities
+        try {
+          console.log('Fetching recent activities...');
+          const userActivities = await notificationsClient.getMyActivities(5);
+          console.log('Received activities:', userActivities);
+          if (userActivities && Array.isArray(userActivities)) {
+            setActivities(userActivities);
+          } else {
+            console.warn('Invalid activities data format:', userActivities);
+            setActivities([]);
+          }
+        } catch (error) {
+          console.error("Failed to load activities:", error);
+          toast.error("Failed to load recent activities");
+          setActivities([]);
         }
-      } catch (error) {
-        console.warn("Failed to reload analytics:", error)
-      }
-
-      try {
-        const progress = await learningAnalyticsClient.getCourseStats()
-        if (progress) {
-          const progressData = [
-            {
-              course: "Completed",
-              value: progress.completed,
-              color: "#0ea5e9",
-              percentage: Math.round((progress.completed / progress.totalCourses) * 100),
-            },
-            {
-              course: "In Progress",
-              value: progress.inProgress,
-              color: "#38bdf8",
-              percentage: Math.round((progress.inProgress / progress.totalCourses) * 100),
-            },
-            {
-              course: "Paused",
-              value: progress.paused,
-              color: "#7dd3fc",
-              percentage: Math.round((progress.paused / progress.totalCourses) * 100),
-            },
-            {
-              course: "Not Started",
-              value: progress.notStarted,
-              color: "#bae6fd",
-              percentage: Math.round((progress.notStarted / progress.totalCourses) * 100),
-            },
-          ]
-          setCourseProgress(progressData)
-        }
-      } catch (error) {
-        console.warn("Failed to reload course progress:", error)
-      }
-
-      try {
-        const userActivities = await notificationsClient.getMyActivities(5)
-        setActivities(userActivities)
-      } catch (error) {
-        console.warn("Failed to reload activities:", error)
-      }
-
-      try {
-        const userPartners = await socialClient.getMyPartners()
-        setPartners(userPartners.slice(0, 5))
-      } catch (error) {
-        console.warn("Failed to reload partners:", error)
       }
     } catch (error) {
-      console.error("Error generating sample data:", error)
+      console.error("Error loading dashboard data:", error);
+      toast.error("Failed to load dashboard data");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
+  }, [isAuthenticated, learningAnalyticsClient]);
+
+  // Load data on component mount and when dependencies change
+    useEffect(() => {
+    const initDashboard = async () => {
+      // Only load data if clients are initialized and user is authenticated.
+      if (clientsInitialized && isAuthenticated) {
+        try {
+          await loadDashboardData();
+        } catch (error) {
+          console.error("Failed to initialize dashboard:", error);
+          setLoading(false);
+        }
+      } else if (clientsInitialized && !isAuthenticated) {
+        // If clients are initialized but user is not authenticated, stop loading.
+        setLoading(false);
+      }
+    };
+
+    initDashboard();
+  }, [clientsInitialized, isAuthenticated, loadDashboardData]);
+
+  
+
+  // Format relative time function for activity timestamps
+  const formatRelativeTime = (timestamp: bigint | number): string => {
+    const date = new Date(Number(timestamp) * 1000); // Convert seconds to milliseconds
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffHours < 1) return "Just now";
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
   }
 
-  const formatTime = (timestamp: bigint) => {
-    const date = new Date(Number(timestamp) / 1000000)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-    const diffDays = Math.floor(diffHours / 24)
-
-    if (diffHours < 1) return "Just now"
-    if (diffHours < 24) return `${diffHours}h ago`
-    if (diffDays < 7) return `${diffDays}d ago`
-    return date.toLocaleDateString()
-  }
-
-  const getActivityIcon = (activityType: any) => {
+  // Get appropriate icon for different activity types
+  const getActivityIcon = (activityType: { [key: string]: any }) => {
     if ("comment" in activityType) return <MessageSquare className="h-4 w-4" />
     if ("quiz_completed" in activityType) return <CheckCircle className="h-4 w-4" />
     if ("deadline_approaching" in activityType) return <AlertCircle className="h-4 w-4" />
@@ -272,7 +258,8 @@ export default function DashboardPage() {
     return <Bell className="h-4 w-4" />
   }
 
-  const getActivityColor = (activityType: any) => {
+  // Get color for different activity types
+  const getActivityColor = (activityType: { [key: string]: any }) => {
     if ("comment" in activityType) return "text-sky-600"
     if ("quiz_completed" in activityType) return "text-sky-600"
     if ("deadline_approaching" in activityType) return "text-sky-600"
@@ -282,7 +269,19 @@ export default function DashboardPage() {
     return "text-sky-600"
   }
 
-  const CustomTooltip = ({ active, payload }: any) => {
+  // Custom tooltip for charts
+  interface TooltipProps {
+    active?: boolean;
+    payload?: Array<{
+      payload: {
+        course: string;
+        value: number;
+        percentage?: number;
+      };
+    }>;
+  }
+
+  const CustomTooltip = ({ active, payload }: TooltipProps) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload
       return (
@@ -308,14 +307,6 @@ export default function DashboardPage() {
               </h1>
               <p className="text-sky-600/70 mt-1">Welcome back! Here's your learning progress.</p>
             </div>
-            <Button
-              onClick={generateSampleData}
-              disabled={loading}
-              className="bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white"
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Generate Sample Data
-            </Button>
           </div>
 
           {/* XP Balance Card */}
@@ -328,15 +319,11 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-sky-600">XP Balance</p>
-                    <p className="text-3xl font-bold text-sky-800">2,847</p>
+                    <p className="text-3xl font-bold text-sky-800">{detailedCourseProgress.reduce((acc, p) => acc + Number(p.xpEarned), 0).toLocaleString()}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="flex items-center text-sky-600 text-sm font-medium mb-2">
-                    <ArrowUp className="h-4 w-4 mr-1" />
-                    +180 this week
-                  </div>
-                  <Button
+                                    <Button
                     onClick={() => setShowXPModal(true)}
                     className="bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white"
                   >
@@ -405,7 +392,7 @@ export default function DashboardPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={courseProgress}
+                        data={chartCourseProgress}
                         cx="50%"
                         cy="50%"
                         innerRadius={60}
@@ -413,7 +400,7 @@ export default function DashboardPage() {
                         paddingAngle={2}
                         dataKey="value"
                       >
-                        {courseProgress.map((entry, index) => (
+                        {chartCourseProgress.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
@@ -425,12 +412,12 @@ export default function DashboardPage() {
                 {/* Legend and Stats */}
                 <div className="flex-1 ml-8 space-y-4">
                   <div className="text-center mb-6">
-                    <p className="text-2xl font-bold text-sky-800">7</p>
+                    <p className="text-2xl font-bold text-sky-800">{totalCourses}</p>
                     <p className="text-sm text-sky-600">Total Courses</p>
                   </div>
 
                   <div className="space-y-3">
-                    {courseProgress.map((item, index) => (
+                    {chartCourseProgress.map((item, index) => (
                       <div key={index} className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           <div className="w-4 h-4 rounded-full" style={{ backgroundColor: item.color }} />
@@ -448,9 +435,11 @@ export default function DashboardPage() {
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-sky-600">Completion Rate</span>
                       <span className="font-bold text-sky-800">
-                        {Math.round(
-                          (courseProgress[0].value / courseProgress.reduce((sum, item) => sum + item.value, 0)) * 100,
-                        )}
+                        {chartCourseProgress.length > 0 && chartCourseProgress[0].value > 0
+                          ? Math.round(
+                              (chartCourseProgress[0].value / chartCourseProgress.reduce((sum, item) => sum + item.value, 0)) * 100,
+                            )
+                          : 0}
                         %
                       </span>
                     </div>
@@ -535,7 +524,7 @@ export default function DashboardPage() {
                           {activity.description && (
                             <p className="text-xs text-sky-600 mt-1 line-clamp-2">{activity.description}</p>
                           )}
-                          <p className="text-xs text-sky-500 mt-1">{formatTime(activity.timestamp)}</p>
+                          <p className="text-xs text-sky-500 mt-1">{formatRelativeTime(activity.timestamp)}</p>
                         </div>
                         {!activity.isRead && <div className="w-2 h-2 bg-sky-500 rounded-full mt-2"></div>}
                       </div>
@@ -670,7 +659,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <XPPurchaseModal open={showXPModal} onOpenChange={setShowXPModal} />
-    </div>
-  )
+<XPPurchaseModal isOpen={showXPModal} onClose={() => setShowXPModal(false)} />
+</div>
+)
 }

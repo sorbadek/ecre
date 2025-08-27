@@ -157,7 +157,7 @@ export default function ForumPage() {
       toast({
         title: "Question Posted",
         description: "Your question has been successfully added to the forum!",
-        variant: "success",
+        variant: "default",
       })
     } else {
       toast({
@@ -178,16 +178,14 @@ export default function ForumPage() {
     return matchesSearch && matchesStatus
   })
 
-  const getStatusBadgeVariant = (status: ForumQuestion["status"]) => {
+  const getStatusBadgeVariant = (status: string) => {
     switch (status) {
-      case "open":
-        return "secondary"
-      case "answered":
-        return "default"
-      case "resolved":
-        return "success" // Assuming 'success' variant exists or can be defined
+      case 'answered':
+        return 'secondary'
+      case 'resolved':
+        return 'secondary'
       default:
-        return "secondary"
+        return 'default'
     }
   }
 

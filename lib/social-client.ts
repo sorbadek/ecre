@@ -39,8 +39,11 @@ export interface StudyGroup {
   tags: string[]
 }
 
+import { Identity } from "@dfinity/agent";
+
 class SocialClient {
   private actor: any = null;
+  private identity: Identity | null = null;
   
   // Helper to generate a random color
   private getRandomColor(): string {
@@ -58,26 +61,51 @@ class SocialClient {
       .substring(0, 2);
   }
 
+  public setIdentity(identity: Identity | null) {
+    this.identity = identity;
+    this.actor = null; // Reset actor so it's recreated with the new identity
+  }
+
   private async getActor() {
-    if (this.actor) return this.actor
+    if (this.actor) return this.actor;
+
+    if (!this.identity) {
+      console.warn('No identity set for social client');
+      return null;
+    }
 
     try {
-      const authClient = await AuthClient.create()
-      const identity = authClient.getIdentity()
+      const identity = this.identity;
 
-      const host =
-        typeof window !== "undefined" &&
-        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-          ? "http://127.0.0.1:4943"
-          : "https://ic0.app"
+      console.log('Using identity principal:', identity.getPrincipal().toText());
 
+      // Use the same host configuration as notifications client
+      const isLocal = typeof window !== "undefined" && 
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      
+      const host = isLocal 
+        ? "http://127.0.0.1:4943"  // Using port 4943 to match deployment
+        : "https://ic0.app";
+
+      console.log('Initializing social client with host:', host);
+      console.log('Using canister ID:', SOCIAL_CANISTER_ID);
+
+      // Configure agent with explicit API version for local development
       const agent = new HttpAgent({
         identity,
         host,
-      })
+        // Force API v2 for local development
+        ...(isLocal ? { _agent: { _host: { origin: host, protocol: 'http:' } } } : {})
+      });
 
-      if (host.includes("127.0.0.1")) {
-        await agent.fetchRootKey()
+      if (isLocal) {
+        try {
+          await agent.fetchRootKey();
+          console.log('Successfully fetched root key for local development');
+        } catch (error) {
+          console.warn('Failed to fetch root key:', error);
+          // Even if root key fetch fails, we can still proceed in most cases
+        }
       }
 
       this.actor = Actor.createActor(idlFactory, {
@@ -179,12 +207,12 @@ class SocialClient {
         return this.getFallbackPartners();
       }
 
-      // Using the query method for better performance
-      const result = await actor.getMyPartnersQuery();
+      // Get partners from the canister
+      const result = await actor.getMyPartners();
       
       // Ensure result is an array
       if (!Array.isArray(result)) {
-        console.warn('Unexpected response format from getMyPartnersQuery:', result);
+        console.warn('Unexpected response format from getMyPartners:', result);
         return this.getFallbackPartners();
       }
 
@@ -320,4 +348,4 @@ class SocialClient {
   }
 }
 
-export const socialClient = new SocialClient()
+export const socialClient = new SocialClient();

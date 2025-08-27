@@ -1,8 +1,17 @@
-import { Actor, HttpAgent } from "@dfinity/agent"
-import { AuthClient } from "@dfinity/auth-client"
+import { Actor, HttpAgent, Identity } from "@dfinity/agent"
 import { idlFactory } from "./ic/learning-analytics.idl"
 
 const LEARNING_ANALYTICS_CANISTER_ID = "bkyz2-fmaaa-aaaaa-qaaaq-cai"
+
+// Host configuration
+const isLocal = typeof window !== "undefined" && 
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+const HOST = isLocal 
+  ? "http://127.0.0.1:4943"  // Using port 4943 for local development
+  : "https://ic0.app";
+
+console.log('Learning Analytics client configured with host:', HOST);
 
 export interface LearningSession {
   id: string
@@ -50,36 +59,59 @@ export interface CourseStats {
   overallCompletionRate: number
 }
 
-class LearningAnalyticsClient {
+export class LearningAnalyticsClient {
   private actor: any = null
+  private identity: Identity | null = null
+
+  constructor(identity: Identity | null = null) {
+    this.identity = identity
+  }
+
+  setIdentity(identity: Identity | null) {
+    this.identity = identity
+    this.actor = null // Reset actor to be re-created with the new identity
+  }
 
   private async getActor() {
-    if (this.actor) return this.actor
+    if (this.actor) return this.actor;
 
-    const authClient = await AuthClient.create()
-    const identity = authClient.getIdentity()
-
-    const host =
-      typeof window !== "undefined" &&
-      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-        ? "http://127.0.0.1:4943"
-        : "https://ic0.app"
-
-    const agent = new HttpAgent({
-      identity,
-      host,
-    })
-
-    if (host.includes("127.0.0.1")) {
-      await agent.fetchRootKey()
+    if (!this.identity) {
+      // Optionally, handle the case where there's no identity.
+      // For now, we'll let it proceed, and HttpAgent will use an anonymous identity.
+      console.warn("LearningAnalyticsClient is using an anonymous identity.");
     }
 
-    this.actor = Actor.createActor(idlFactory, {
-      agent,
-      canisterId: LEARNING_ANALYTICS_CANISTER_ID,
-    })
+    console.log('Initializing learning analytics client with host:', HOST);
+    
+    try {
+      // Configure agent with explicit API version for local development
+      const agent = new HttpAgent({
+        identity: this.identity || undefined,
+        host: HOST,
+        // Force API v2 for local development
+        ...(isLocal && { _agent: { _host: { origin: HOST, protocol: 'http:' } } })
+      });
 
-    return this.actor
+      if (isLocal) {
+        try {
+          await agent.fetchRootKey();
+          console.log('Successfully fetched root key for local development');
+        } catch (error) {
+          console.warn('Failed to fetch root key:', error);
+          // Even if root key fetch fails, we can still proceed in most cases
+        }
+      }
+
+      this.actor = Actor.createActor(idlFactory, {
+        agent,
+        canisterId: LEARNING_ANALYTICS_CANISTER_ID,
+      });
+
+      return this.actor;
+    } catch (error) {
+      console.error('Failed to initialize actor:', error);
+      throw new Error('Failed to initialize learning analytics client');
+    }
   }
 
   async startLearningSession(contentId: string, contentType: string): Promise<string> {
@@ -155,14 +187,7 @@ class LearningAnalyticsClient {
       return result
     } catch (error) {
       console.error("Error getting weekly stats:", error)
-      // Return fallback data if canister call fails
-      return {
-        userId: "anonymous",
-        weekDates: ["SAT", "SUN", "MON", "TUE", "WED", "THU", "FRI"],
-        dailyHours: [2.5, 4.2, 3.8, 5.1, 4.7, 3.2, 4.8],
-        totalHours: 28.3,
-        averageHours: 4.04,
-      }
+      throw error
     }
   }
 
@@ -173,16 +198,7 @@ class LearningAnalyticsClient {
       return result
     } catch (error) {
       console.error("Error getting course stats:", error)
-      // Return fallback data if canister call fails
-      return {
-        userId: "anonymous",
-        completed: 3,
-        inProgress: 2,
-        paused: 1,
-        notStarted: 1,
-        totalCourses: 7,
-        overallCompletionRate: 65,
-      }
+      throw error
     }
   }
 
@@ -224,4 +240,7 @@ class LearningAnalyticsClient {
   }
 }
 
-export const learningAnalyticsClient = new LearningAnalyticsClient()
+
+// Create a singleton instance of the client
+export const learningAnalyticsClient = new LearningAnalyticsClient();
+

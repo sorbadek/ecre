@@ -1,5 +1,5 @@
-import { Actor, HttpAgent } from "@dfinity/agent"
-import { AuthClient } from "@dfinity/auth-client"
+import { Actor, HttpAgent, AnonymousIdentity } from "@dfinity/agent"
+import { useAuth } from "./auth-context"
 import { idlFactory } from "./ic/notifications.idl"
 
 // Notifications canister ID - local development
@@ -9,9 +9,9 @@ export const NOTIFICATIONS_CANISTER_ID = "bd3sg-teaaa-aaaaa-qaaba-cai"
 const isLocal = typeof window !== "undefined" && 
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
 
-// Use the same host as the session client for consistency
+// For local development, use port 4943 to match the deployment configuration
 const HOST = isLocal 
-  ? "http://127.0.0.1:4943" 
+  ? "http://127.0.0.1:4943"  // Using port 4943 to match deployment
   : "https://ic0.app"
 
 console.log('Notifications client initialized with host:', HOST)
@@ -50,51 +50,30 @@ export interface NotificationPreferences {
 
 class NotificationsClient {
   private actor: any = null;
-  private authClient: AuthClient | null = null;
+  private identity: any = null;
 
-  private async getAuthClient(): Promise<AuthClient> {
-    if (!this.authClient) {
-      this.authClient = await AuthClient.create({
-        idleOptions: { disableIdle: true },
-      });
-    }
-    return this.authClient;
+  // Set the identity from the auth context
+  public setIdentity(identity: any) {
+    this.identity = identity;
+    // Clear the actor when identity changes to force recreation
+    this.actor = null;
   }
 
-  private async getActor(requireAuth = true) {
+  private async getActor() {
     if (this.actor) return this.actor;
 
     try {
-      let agent: HttpAgent;
+      // Use the provided identity or fall back to anonymous
+      const identity = this.identity || new AnonymousIdentity();
       
-      if (requireAuth) {
-        const authClient = await this.getAuthClient();
-        
-        // Check authentication state if required
-        if (!(await authClient.isAuthenticated())) {
-          throw new Error('User not authenticated. Please log in first.');
-        }
-
-        const identity = authClient.getIdentity();
-        if (!identity) {
-          throw new Error('Failed to get identity. Please try logging in again.');
-        }
-        
-        agent = new HttpAgent({
-          identity,
-          host: HOST,
-          verifyQuerySignatures: false,
-        });
-      } else {
-        // For unauthenticated requests, use an anonymous identity
-        console.log('Using anonymous identity for notifications');
-        agent = new HttpAgent({
-          host: HOST,
-          verifyQuerySignatures: false,
-        });
-      }
+      const agent = new HttpAgent({
+        identity,
+        host: HOST,
+        verifyQuerySignatures: false,
+      });
 
       console.log('Connecting to notifications canister:', NOTIFICATIONS_CANISTER_ID);
+      console.log('Using host:', HOST);
 
       // For local development, fetch root key
       if (isLocal) {
@@ -102,7 +81,7 @@ class NotificationsClient {
           await agent.fetchRootKey();
           console.log('Successfully fetched root key for local development');
         } catch (error) {
-          console.warn('Failed to fetch root key. This is expected in production.');
+          console.warn('Failed to fetch root key:', error);
         }
       }
 
@@ -151,12 +130,12 @@ class NotificationsClient {
     }
   }
 
-  async getMyActivities(limit: number = 10, requireAuth: boolean = false): Promise<Activity[]> {
+  async getMyActivities(limit: number = 10): Promise<Activity[]> {
     try {
       // First try to get the actor
       let actor;
       try {
-        actor = await this.getActor(requireAuth);
+        actor = await this.getActor();
         if (!actor) {
           console.warn('No actor available, returning fallback activities');
           return this.getFallbackActivities();
@@ -169,8 +148,9 @@ class NotificationsClient {
       console.log(`Fetching activities with limit: ${limit}`);
       
       try {
-        // Convert number to optional BigInt for the canister call
+        // For optional Nat parameters, we need to use an array with 0 or 1 elements
         const limitParam = limit > 0 ? [BigInt(limit)] : [];
+        console.log('Calling getMyActivities with limit:', limitParam);
         const result = await actor.getMyActivities(limitParam);
         
         if (!Array.isArray(result)) {
@@ -373,4 +353,6 @@ class NotificationsClient {
   }
 }
 
-export const notificationsClient = new NotificationsClient()
+// Export a single instance of NotificationsClient
+const notificationsClient = new NotificationsClient();
+export { notificationsClient };

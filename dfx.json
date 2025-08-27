@@ -15,6 +15,10 @@
     "notifications": {
       "main": "backend/notifications/main.mo",
       "type": "motoko"
+    },
+    "social": {
+      "main": "backend/social/main.mo",
+      "type": "motoko"
     }
   },
   "defaults": {
@@ -26,6 +30,14 @@
     "local": {
       "bind": "127.0.0.1:4943",
       "type": "ephemeral"
+    }
+  },
+  "http": {
+    "headers": {
+      "Access-Control-Allow-Origin": ["*"],
+      "Access-Control-Allow-Methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      "Access-Control-Allow-Headers": ["Content-Type", "Authorization"],
+      "Access-Control-Allow-Credentials": ["true"]
     }
   },
   "version": 1

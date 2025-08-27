@@ -5,6 +5,7 @@ import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/toaster'
 import { AuthProvider } from '@/lib/auth-context'
+import { Providers } from '@/components/providers'
 
 const inter = Inter({ subsets: ['latin'] })
 const kalam = Kalam({ 
@@ -33,10 +34,12 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AuthProvider>
-            {children}
-            <Toaster />
-          </AuthProvider>
+          <Providers>
+            <AuthProvider>
+              {children}
+              <Toaster />
+            </AuthProvider>
+          </Providers>
         </ThemeProvider>
       </body>
     </html>

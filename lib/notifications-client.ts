@@ -131,57 +131,36 @@ class NotificationsClient {
   }
 
   async getMyActivities(limit: number = 10): Promise<Activity[]> {
-    try {
-      // First try to get the actor
-      let actor;
-      try {
-        actor = await this.getActor();
-        if (!actor) {
-          console.warn('No actor available, returning fallback activities');
-          return this.getFallbackActivities();
-        }
-      } catch (authError) {
-        console.warn('Error getting actor, using fallback activities:', authError);
-        return this.getFallbackActivities();
-      }
-
-      console.log(`Fetching activities with limit: ${limit}`);
-      
-      try {
-        // For optional Nat parameters, we need to use an array with 0 or 1 elements
-        const limitParam = limit > 0 ? [BigInt(limit)] : [];
-        console.log('Calling getMyActivities with limit:', limitParam);
-        const result = await actor.getMyActivities(limitParam);
-        
-        if (!Array.isArray(result)) {
-          console.warn('Unexpected result format from canister, expected array:', result);
-          return this.getFallbackActivities();
-        }
-        
-        // Ensure each activity has all required fields with proper types
-        return result.map(activity => ({
-          id: activity.id?.toString() || '',
-          userId: activity.userId?.toString() || '',
-          activityType: activity.activityType || { system_update: null },
-          title: activity.title?.toString() || 'New Activity',
-          description: activity.description?.toString(),
-          metadata: activity.metadata?.toString(),
-          timestamp: activity.timestamp ? BigInt(activity.timestamp.toString()) : BigInt(0),
-          priority: typeof activity.priority === 'number' ? activity.priority : 1,
-          isRead: !!activity.isRead,
-          expiresAt: activity.expiresAt ? BigInt(activity.expiresAt.toString()) : undefined
-        }));
-      } catch (callError) {
-        console.error('Error calling getMyActivities:', callError);
-        return this.getFallbackActivities();
-      }
-    } catch (error) {
-      console.error('Error in getMyActivities:', error);
-      // Return fallback activities but don't mask the error completely
-      const fallback = this.getFallbackActivities();
-      console.warn('Using fallback activities due to error');
-      return fallback;
+    const actor = await this.getActor();
+    if (!actor) {
+      throw new Error('Failed to initialize actor');
     }
+
+    console.log(`Fetching activities with limit: ${limit}`);
+    
+    // For optional Nat parameters, we need to use an array with 0 or 1 elements
+    const limitParam = limit > 0 ? [BigInt(limit)] : [];
+    console.log('Calling getMyActivities with limit:', limitParam);
+    
+    const result = await actor.getMyActivities(limitParam);
+    
+    if (!Array.isArray(result)) {
+      throw new Error('Unexpected result format from canister');
+    }
+    
+    // Ensure each activity has all required fields with proper types
+    return result.map(activity => ({
+      id: activity.id?.toString() || '',
+      userId: activity.userId?.toString() || '',
+      activityType: activity.activityType || { system_update: null },
+      title: activity.title?.toString() || '',
+      description: activity.description?.toString(),
+      metadata: activity.metadata?.toString(),
+      timestamp: activity.timestamp ? BigInt(activity.timestamp.toString()) : BigInt(0),
+      priority: typeof activity.priority === 'number' ? activity.priority : 1,
+      isRead: !!activity.isRead,
+      expiresAt: activity.expiresAt ? BigInt(activity.expiresAt.toString()) : undefined
+    }));
   }
 
   async markActivityAsRead(activityId: string): Promise<Activity> {
@@ -214,22 +193,6 @@ class NotificationsClient {
     }
   }
 
-  async generateSampleActivities(): Promise<string> {
-    try {
-      const actor = await this.getActor();
-      if (!actor) throw new Error("Actor not available");
-
-      const result = await actor.generateSampleActivities();
-      if ("ok" in result) {
-        return result.ok;
-      } else {
-        throw new Error(result.err);
-      }
-    } catch (error) {
-      console.error("Error generating sample activities:", error);
-      throw error;
-    }
-  }
 
   async updatePreferences(
     emailNotifications: boolean,
@@ -291,66 +254,6 @@ class NotificationsClient {
     }
   }
 
-  private getFallbackActivities(): Activity[] {
-    const now = BigInt(Date.now() * 1000000);
-    return [
-      {
-        id: "1",
-        userId: "anonymous",
-        activityType: { quiz_completed: null },
-        title: "Quiz Completed",
-        description: "You completed the React Fundamentals quiz with 95% score!",
-        metadata: JSON.stringify({ score: 95, quiz: "react-fundamentals" }),
-        timestamp: now - BigInt(3600000000000), // 1 hour ago
-        priority: 2,
-        isRead: false,
-      },
-      {
-        id: "2",
-        userId: "anonymous",
-        activityType: { achievement_earned: null },
-        title: "Achievement Unlocked",
-        description: "You earned the 'Fast Learner' badge for completing 5 lessons in one day!",
-        metadata: JSON.stringify({ badge: "fast-learner", xp: 100 }),
-        timestamp: now - BigInt(7200000000000), // 2 hours ago
-        priority: 3,
-        isRead: false,
-      },
-      {
-        id: "3",
-        userId: "anonymous",
-        activityType: { course_available: null },
-        title: "New Course Available",
-        description: "Advanced TypeScript course is now available in your learning path.",
-        metadata: JSON.stringify({ course: "advanced-typescript", instructor: "Jane Doe" }),
-        timestamp: now - BigInt(10800000000000), // 3 hours ago
-        priority: 1,
-        isRead: true,
-      },
-      {
-        id: "4",
-        userId: "anonymous",
-        activityType: { session_joined: null },
-        title: "Study Session Joined",
-        description: "You joined the 'React Patterns' study group session.",
-        metadata: JSON.stringify({ session: "react-patterns", host: "John Smith" }),
-        timestamp: now - BigInt(14400000000000), // 4 hours ago
-        priority: 1,
-        isRead: true,
-      },
-      {
-        id: "5",
-        userId: "anonymous",
-        activityType: { comment: null },
-        title: "New Comment",
-        description: "Sarah Chen commented on your project submission.",
-        metadata: JSON.stringify({ project: "final-project", commentId: "cmt123" }),
-        timestamp: now - BigInt(18000000000000), // 5 hours ago
-        priority: 1,
-        isRead: true,
-      },
-    ];
-  }
 }
 
 // Export a single instance of NotificationsClient

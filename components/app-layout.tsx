@@ -34,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useAuth } from "@/lib/auth-context"
-import XPurchaseModal from "@/components/xp-purchase-modal"
+import { XPPurchaseModal } from "@/components/xp-purchase-modal"
 import { toast } from "@/hooks/use-toast"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
@@ -425,7 +425,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
         </div>
       </SidebarInset>
-      <XPurchaseModal isOpen={isXPPurchaseModalOpen} onClose={() => setIsXPPurchaseModalOpen(false)} />
+      <XPPurchaseModal isOpen={isXPPurchaseModalOpen} onClose={() => setIsXPPurchaseModalOpen(false)} />
     </SidebarProvider>
   )
 }

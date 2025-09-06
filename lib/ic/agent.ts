@@ -12,13 +12,13 @@ export const SOCIAL_CANISTER_ID = "lf7o5-cp777-77777-aaada-cai" // Local social 
 export const ASSET_CANISTER_ID = "lqy7q-dh777-77777-aaaaq-cai" // Local UI/asset canister (using wallet canister ID as it's the frontend canister)
 
 export function detectIcHost(): string {
-  // Always use local replica for development
+  // Always use port 4943 to match the IC replica's expected port
   const host = "http://127.0.0.1:4943"
   
   if (typeof window !== "undefined") {
-    console.log("Using local replica at:", host, "| Hostname:", window.location.hostname)
+    console.log("Using IC replica at:", host, "| Hostname:", window.location.hostname)
   } else {
-    console.log("Using local replica at:", host, "| Server-side")
+    console.log("Using IC replica at:", host, "| Server-side")
   }
 
   return host
@@ -41,34 +41,67 @@ export async function getAgent(identity?: Identity) {
 
   console.log("Creating IC agent with host:", host, "| Identity:", !!identity, "| Local:", isLocal)
 
-  // Simple fetch function for local development
+  // Custom fetch function with CORS handling
   const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const isLocalRequest = url.includes('127.0.0.1') || url.includes('localhost');
     
     // Create headers
-    const headers = new Headers(init?.headers)
-    headers.set('Content-Type', 'application/cbor')
+    const headers = new Headers(init?.headers);
+    headers.set('Content-Type', 'application/cbor');
     
-    // Configure request
-    const requestInit: RequestInit = {
-      ...init,
-      headers,
-      mode: 'cors',
-      credentials: 'include',
-      cache: 'no-store'
-    }
+    // For local development, we need to handle CORS differently
+    if (isLocalRequest) {
+      // Merge headers with CORS headers for local development
+      headers.set('Access-Control-Request-Headers', 'content-type');
+      headers.set('Access-Control-Request-Method', 'POST');
+      headers.set('Origin', 'http://localhost:3000');
+      
+      const requestInit: RequestInit = {
+        ...init,
+        headers,
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store'
+      };
 
-    try {
-      // Make the request
-      const response = await fetch(input.toString(), requestInit);
-      
-      // Log response details for debugging
-      if (isLocal) {
-        console.log('Response status:', response.status, response.statusText);
-        console.log('Request URL:', url);
+      try {
+        const response = await fetch(url, requestInit);
+        
+        if (isLocal) {
+          console.log('Local request to:', url);
+          console.log('Response status:', response.status, response.statusText);
+        }
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Request failed:', response.status, response.statusText, errorText);
+          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+        }
+        
+        return response;
+      } catch (error) {
+        console.error('Local fetch error:', error);
+        console.error('Request URL:', url);
+        throw error;
       }
+    }
+    
+    // For non-local requests, use production configuration
+    try {
+      const requestInit: RequestInit = {
+        ...init,
+        headers: {
+          ...Object.fromEntries(headers.entries()),
+          'Content-Type': 'application/cbor'
+        },
+        mode: 'cors',
+        credentials: 'include',
+        cache: 'no-store'
+      };
+
+      const response = await fetch(url, requestInit);
       
-      // Handle errors
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Request failed:', response.status, response.statusText, errorText);
@@ -76,15 +109,9 @@ export async function getAgent(identity?: Identity) {
       }
       
       return response;
-      
     } catch (error) {
       console.error('Fetch error:', error);
       console.error('Request URL:', url);
-      console.error('Request Init:', {
-        ...requestInit,
-        // Don't log the actual body as it might be large
-        body: requestInit.body ? '[body]' : undefined
-      });
       throw error;
     }
   }
@@ -94,19 +121,28 @@ export async function getAgent(identity?: Identity) {
     host,
     identity,
     fetch: customFetch,
-    verifyQuerySignatures: false // Disable verification for local development
+    ...(isLocal ? {
+      // Local development specific settings
+      verifyQuerySignatures: false,
+      verifyUpdateCalls: false,
+      verifyResponse: false
+    } : {
+      // Production settings
+      host: 'https://ic0.app',
+      verifyQuerySignatures: true,
+      verifyUpdateCalls: true,
+      verifyResponse: true
+    })
   });
 
   if (isLocal) {
     console.log("Running in local development mode - skipping root key fetch")
-    // In local development, we don't need to fetch the root key
-    // as we're not verifying signatures
     try {
-      // This is a no-op in local development
-      await Promise.resolve()
+      // In local development, fetch the root key for the local replica
+      await agent.fetchRootKey()
     } catch (error) {
-      console.error("Error in local development setup:", error)
-      throw error
+      console.error("Error fetching root key for local replica:", error)
+      // Continue even if root key fetch fails in local development
     }
   } else {
     // In production, we need to fetch the root key

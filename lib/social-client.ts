@@ -362,7 +362,9 @@ class SocialClient {
       const principal = this.identity.getPrincipal();
       const principalString = principal.toString();
 
+      // Use getStudyGroups which is now defined in the IDL
       const result = await actor.getStudyGroups();
+        
       if (!Array.isArray(result)) {
         throw new Error("Unexpected response format from getStudyGroups");
       }

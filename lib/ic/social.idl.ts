@@ -58,6 +58,7 @@ export const idlFactory = ({ IDL }: any) => {
     leaveStudyGroup: IDL.Func([IDL.Text], [Result], []),
     getMyStudyGroups: IDL.Func([], [IDL.Vec(StudyGroup)], ["query"]),
     getPublicStudyGroups: IDL.Func([], [IDL.Vec(StudyGroup)], ["query"]),
+    getStudyGroups: IDL.Func([], [IDL.Vec(StudyGroup)], ["query"]),
     generateSamplePartners: IDL.Func([], [Result], []),
     updateOnlineStatus: IDL.Func([OnlineStatus], [Result], []),
   })

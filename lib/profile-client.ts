@@ -2,6 +2,21 @@ import { getIdentity, userProfileActor } from "./ic/agent"
 import type { UserProfile, ProfileUpdate, UserFile } from "./ic/user-profile.idl"
 import { uploadToAssetCanister } from "./ic/asset-uploader"
 
+export interface UserProfileExtended extends Omit<UserProfile, 'interests'> {
+  jobTitle?: string;
+  company?: string;
+  education?: string;
+  location?: string;
+  website?: string;
+  phone?: string;
+  skills?: string[];
+  interests: string[]; // Make this required to match parent interface
+  coverImageUrl?: string;
+  experience?: string;
+  hourlyRate?: number;
+  availability?: string;
+}
+
 // Local fallback keys - KEYED BY PRINCIPAL
 const LS_PREFIX = "peerverse_profile_"
 
@@ -50,36 +65,65 @@ function normalizeProfileFromCanister(raw: any): UserProfile {
 }
 
 // USER-SPECIFIC DATA RETRIEVAL
-export async function getMyProfile(): Promise<UserProfile | null> {
+export async function getMyProfile(): Promise<UserProfileExtended> {
   const identity = await getIdentity()
-  if (!identity) return null
+  if (!identity) throw new Error("Not authenticated")
   const principal = identity.getPrincipal().toText()
 
   try {
     const actor = await userProfileActor<any>(identity)
     const result = await actor.getMyProfile()
-    if (result) {
-      const normalized = normalizeProfileFromCanister(result)
-      // Cache locally
-      try {
-        localStorage.setItem(lsKey(principal), JSON.stringify(normalized))
-      } catch {}
-      return normalized
+    
+    if (!result) {
+      throw new Error("No profile data returned")
     }
+    
+    const normalized = normalizeProfileFromCanister(result)
+    
+    // Cache locally
+    try {
+      localStorage.setItem(lsKey(principal), JSON.stringify(normalized))
+    } catch (e) {
+      console.warn("Failed to cache profile:", e)
+    }
+    
+    return normalized
   } catch (e) {
-    console.warn("getMyProfile canister call failed, using local fallback:", e)
+    console.error("Failed to fetch profile:", e)
+    
+    // Fallback to local storage
+    try {
+      const raw = localStorage.getItem(lsKey(principal))
+      if (raw) return JSON.parse(raw)
+    } catch (e) {
+      console.warn("Failed to load profile from local storage:", e)
+    }
+    
+    throw new Error("Failed to load profile")
   }
-
-  // Fallback to local storage
-  try {
-    const raw = localStorage.getItem(lsKey(principal))
-    if (raw) return JSON.parse(raw)
-  } catch {}
-
-  return null
 }
 
-export async function createProfile(name: string, email: string): Promise<UserProfile> {
+// Get user profile by ID
+export async function getUserProfile(userId: string): Promise<UserProfileExtended> {
+  const identity = await getIdentity()
+  if (!identity) throw new Error("Not authenticated")
+
+  try {
+    const actor = await userProfileActor<any>(identity)
+    const result = await actor.getUserProfile(userId)
+    
+    if (!result) {
+      throw new Error("Profile not found")
+    }
+    
+    return normalizeProfileFromCanister(result) as UserProfileExtended
+  } catch (e) {
+    console.error("Error fetching user profile:", e)
+    throw new Error("Failed to fetch user profile")
+  }
+}
+
+export async function createProfile(name: string, email: string): Promise<UserProfileExtended> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
 
@@ -104,7 +148,7 @@ export async function createProfile(name: string, email: string): Promise<UserPr
   }
 }
 
-export async function updateMyProfile(update: ProfileUpdate): Promise<UserProfile> {
+export async function updateProfile(update: Partial<UserProfileExtended>): Promise<UserProfileExtended> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
 
@@ -141,7 +185,7 @@ export async function updateMyProfile(update: ProfileUpdate): Promise<UserProfil
   }
 }
 
-export async function updateAvatar(avatarUrl: string): Promise<UserProfile> {
+export async function updateAvatar(avatarUrl: string): Promise<UserProfileExtended> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
 
@@ -166,7 +210,7 @@ export async function updateAvatar(avatarUrl: string): Promise<UserProfile> {
   }
 }
 
-export async function updateCover(coverUrl: string): Promise<UserProfile> {
+export async function updateCover(coverUrl: string): Promise<UserProfileExtended> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
 
@@ -306,7 +350,57 @@ export async function deleteFile(fileId: string): Promise<boolean> {
   }
 }
 
-export async function addSocialLink(platform: string, url: string): Promise<UserProfile> {
+// Upload a file to the user's profile
+export async function uploadFile(
+  file: File,
+  category: string = 'other',
+  tags: string[] = []
+): Promise<{ url: string; file: UserFile }> {
+  try {
+    const identity = await getIdentity()
+    if (!identity) throw new Error("Not authenticated")
+
+    // Upload the file to the asset canister
+    const fileUrl = await uploadToAssetCanister(
+      file,
+      identity.getPrincipal().toText()
+    )
+
+    // Get the file metadata
+    const fileData: UserFile = {
+      id: `${Date.now()}-${file.name}`, // Generate a unique ID
+      filename: file.name,
+      contentType: file.type,
+      size: BigInt(file.size),
+      url: fileUrl,
+      category,
+      tags,
+      uploadedAt: BigInt(Date.now())
+    }
+
+    // Save the file reference to the user's profile
+    const actor = await userProfileActor<any>(identity)
+    const result = await actor.uploadFile(
+      file.name,
+      file.type,
+      Number(file.size),
+      fileUrl,
+      category,
+      tags
+    )
+
+    if ("ok" in result) {
+      return { url: fileUrl, file: fileData }
+    } else {
+      throw new Error(result.err || "Failed to save file reference")
+    }
+  } catch (error) {
+    console.error("Error uploading file:", error)
+    throw new Error("Failed to upload file")
+  }
+}
+
+export async function addSocialLink(platform: string, url: string): Promise<UserProfileExtended> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
 
@@ -331,7 +425,7 @@ export async function addSocialLink(platform: string, url: string): Promise<User
   }
 }
 
-export async function removeSocialLink(platform: string): Promise<UserProfile> {
+export async function removeSocialLink(platform: string): Promise<UserProfileExtended> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
 

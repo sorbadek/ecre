@@ -1,0 +1,79 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Bell, CheckCircle, MessageSquare, AlertCircle } from "lucide-react"
+import { Button } from "../ui/button"
+import { Badge } from "../ui/badge"
+import { notificationsClient, type Activity, type ActivityType } from "@/lib/notifications-client"
+import { useApiClients } from "@/lib/use-api-clients"
+import { toast } from "sonner"
+
+type NotificationType = 'all' | 'unread'
+
+interface NotificationPreferences {
+  email: boolean
+  push: boolean
+  inApp: boolean
+  marketing: boolean
+}
+
+export function NotificationsPanel() {
+  const [notifications, setNotifications] = useState<Activity[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const { isAuthenticated } = useApiClients()
+
+  // Load notifications
+  useEffect(() => {
+    if (!isAuthenticated) return
+    
+    const loadData = async () => {
+      try {
+        setLoading(true)
+        const activities = await notificationsClient.getMyActivities(50)
+        setNotifications(activities || [])
+        setUnreadCount(activities.filter(a => !a.isRead).length)
+      } catch (error) {
+        console.error("Error loading notifications:", error)
+        toast.error("Failed to load notifications")
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadData()
+    const interval = setInterval(loadData, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [isAuthenticated])
+
+  const handleMarkAsRead = async (id: string) => {
+    try {
+      await notificationsClient.markAsRead(id)
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
+      setUnreadCount(prev => Math.max(0, prev - 1))
+    } catch (error) {
+      console.error("Error marking as read:", error)
+      toast.error("Failed to mark as read")
+    }
+  }
+
+  const getActivityIcon = (activityType: ActivityType) => {
+    if ('comment' in activityType) return <MessageSquare className="h-4 w-4" />
+    if ('quiz_completed' in activityType) return <CheckCircle className="h-4 w-4" />
+    if ('deadline_approaching' in activityType) return <AlertCircle className="h-4 w-4" />
+    return <Bell className="h-4 w-4" />
+  }
+
+  return (
+    <div className="relative">
+      <Button variant="ghost" size="icon" className="relative">
+        <Bell className="h-5 w-5" />
+        {unreadCount > 0 && (
+          <Badge variant="destructive" className="absolute -top-1 -right-1 h-5 w-5 p-0 rounded-full">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </Badge>
+        )}
+      </Button>
+    </div>
+  )
+}

@@ -1,8 +1,10 @@
-import { Actor, HttpAgent } from "@dfinity/agent"
+import { Actor, HttpAgent, type Identity } from "@dfinity/agent"
 import { AuthClient } from "@dfinity/auth-client"
 import { idlFactory } from "./ic/social.idl"
+import { Principal } from "@dfinity/principal"
+import { getIdentity } from "./ic/agent"
 
-const SOCIAL_CANISTER_ID = "bw4dl-smaaa-aaaaa-qaacq-cai"
+const SOCIAL_CANISTER_ID = "lf7o5-cp777-77777-aaada-cai"
 
 export interface PartnerProfile {
   principal: string
@@ -31,15 +33,16 @@ export interface StudyGroup {
   id: string
   name: string
   description: string
-  creator: string
-  members: string[]
+  memberCount: number
   maxMembers: number
   isPublic: boolean
-  createdAt: bigint
   tags: string[]
+  createdAt: bigint
+  isMember: boolean
+  owner: string
+  creator?: string
+  members?: string[]
 }
-
-import { Identity } from "@dfinity/agent";
 
 class SocialClient {
   private actor: any = null;
@@ -125,11 +128,11 @@ class SocialClient {
       const actor = await this.getActor()
       if (!actor) throw new Error("Actor not available")
 
-      const result = await actor.sendPartnerRequest(to, message ? [message] : [])
+      const result = await actor.sendPartnerRequest(Principal.fromText(to), message || '')
       if ("ok" in result) {
-        return result.ok
+        return result.ok;
       } else {
-        throw new Error(result.err)
+        throw new Error(result.err);
       }
     } catch (error) {
       console.error("Error sending partner request:", error)
@@ -272,10 +275,28 @@ class SocialClient {
     try {
       const actor = await this.getActor()
       if (!actor) throw new Error("Actor not available")
+      if (!this.identity) throw new Error("Not authenticated")
 
       const result = await actor.createStudyGroup(name, description, maxMembers, isPublic, tags)
       if ("ok" in result) {
-        return result.ok
+        const group = result.ok;
+        const members = group.members || [];
+        const creator = group.creator?.toString() || this.identity.getPrincipal().toString();
+        
+        return {
+          id: group.id.toString(),
+          name: group.name,
+          description: group.description,
+          memberCount: members.length,
+          maxMembers: group.maxMembers,
+          isPublic: group.isPublic,
+          tags: group.tags,
+          createdAt: group.createdAt,
+          isMember: true, // Creator is automatically a member
+          owner: creator,
+          creator,
+          members: members.map((m: Principal) => m.toString())
+        };
       } else {
         throw new Error(result.err)
       }
@@ -299,6 +320,78 @@ class SocialClient {
     } catch (error) {
       console.error("Error generating sample partners:", error)
       throw error
+    }
+  }
+
+  async joinStudyGroup(groupId: string): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      
+      const result = await actor.joinStudyGroup(Principal.fromText(groupId));
+      if ("err" in result) {
+        throw new Error(result.err);
+      }
+    } catch (error) {
+      console.error("Error joining study group:", error);
+      throw error;
+    }
+  }
+
+  async leaveStudyGroup(groupId: string): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      
+      const result = await actor.leaveStudyGroup(Principal.fromText(groupId));
+      if ("err" in result) {
+        throw new Error(result.err);
+      }
+    } catch (error) {
+      console.error("Error leaving study group:", error);
+      throw error;
+    }
+  }
+
+  async getStudyGroups(): Promise<StudyGroup[]> {
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      if (!this.identity) throw new Error("Not authenticated");
+
+      const principal = this.identity.getPrincipal();
+      const principalString = principal.toString();
+
+      const result = await actor.getStudyGroups();
+      if (!Array.isArray(result)) {
+        throw new Error("Unexpected response format from getStudyGroups");
+      }
+
+      return result.map((group: any) => {
+        const members = Array.isArray(group.members)
+          ? group.members.map((m: Principal) => m.toString())
+          : [];
+        const creator = group.creator?.toString() || principalString;
+        const isMember = members.includes(principalString);
+        
+        return {
+          id: group.id.toString(),
+          name: group.name,
+          description: group.description,
+          memberCount: members.length,
+          maxMembers: group.maxMembers,
+          isPublic: group.isPublic,
+          tags: group.tags || [],
+          createdAt: group.createdAt,
+          isMember,
+          owner: creator,
+          creator,
+          members
+        };
+      });
+    } catch (error) {
+      console.error("Error getting study groups:", error);
+      throw error;
     }
   }
 
@@ -348,4 +441,36 @@ class SocialClient {
   }
 }
 
+// Export the social client instance
 export const socialClient = new SocialClient();
+
+// Helper functions that use the social client
+export async function getMyPartners(): Promise<PartnerProfile[]> {
+  return socialClient.getMyPartners();
+}
+
+export async function sendPartnerRequest(principal: string, message?: string): Promise<string> {
+  return socialClient.sendPartnerRequest(principal, message);
+}
+
+export async function getStudyGroups(): Promise<StudyGroup[]> {
+  return socialClient.getStudyGroups();
+}
+
+export async function createStudyGroup(
+  name: string,
+  description: string,
+  maxMembers: number,
+  isPublic: boolean,
+  tags: string[]
+): Promise<StudyGroup> {
+  return socialClient.createStudyGroup(name, description, maxMembers, isPublic, tags);
+}
+
+export async function joinStudyGroup(groupId: string): Promise<void> {
+  return socialClient.joinStudyGroup(groupId);
+}
+
+export async function leaveStudyGroup(groupId: string): Promise<void> {
+  return socialClient.leaveStudyGroup(groupId);
+}

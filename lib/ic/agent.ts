@@ -3,24 +3,20 @@ import { AuthClient } from "@dfinity/auth-client"
 import type { IDL } from "@dfinity/candid"
 import { idlFactory as userProfileIdl } from "./user-profile.idl"
 
-export const USER_PROFILE_CANISTER_ID = "b77ix-eeaaa-aaaaa-qaada-cai" // Local user_profile canister
-export const LEARNING_ANALYTICS_CANISTER_ID = "bkyz2-fmaaa-aaaaa-qaaaq-cai" // Local learning_analytics canister
-export const NOTIFICATIONS_CANISTER_ID = "bd3sg-teaaa-aaaaa-qaaba-cai" // Local notifications canister
-export const RECOMMENDATIONS_CANISTER_ID = "be2us-64aaa-aaaaa-qaabq-cai" // Local recommendations canister
-export const SESSIONS_CANISTER_ID = "br5f7-7uaaa-aaaaa-qaaca-cai" // Local sessions canister
-export const SOCIAL_CANISTER_ID = "bw4dl-smaaa-aaaaa-qaacq-cai" // Local social canister
-export const ASSET_CANISTER_ID = "by6od-j4aaa-aaaaa-qaadq-cai" // Local UI/asset canister
+export const USER_PROFILE_CANISTER_ID = "lc6ij-px777-77777-aaadq-cai" // Local user_profile canister
+export const LEARNING_ANALYTICS_CANISTER_ID = "lz3um-vp777-77777-aaaba-cai" // Local learning_analytics canister
+export const NOTIFICATIONS_CANISTER_ID = "l62sy-yx777-77777-aaabq-cai" // Local notifications canister
+export const RECOMMENDATIONS_CANISTER_ID = "ll5dv-z7777-77777-aaaca-cai" // Local recommendations canister
+export const SESSIONS_CANISTER_ID = "lm4fb-uh777-77777-aaacq-cai" // Local sessions canister
+export const SOCIAL_CANISTER_ID = "lf7o5-cp777-77777-aaada-cai" // Local social canister
+export const ASSET_CANISTER_ID = "lqy7q-dh777-77777-aaaaq-cai" // Local UI/asset canister (using wallet canister ID as it's the frontend canister)
 
 export function detectIcHost(): string {
   // Always use local replica for development
   const host = "http://127.0.0.1:4943"
   
   if (typeof window !== "undefined") {
-    console.log(
-      "Using local replica at:",
-      host,
-      "| Hostname:", window.location.hostname
-    )
+    console.log("Using local replica at:", host, "| Hostname:", window.location.hostname)
   } else {
     console.log("Using local replica at:", host, "| Server-side")
   }
@@ -45,109 +41,61 @@ export async function getAgent(identity?: Identity) {
 
   console.log("Creating IC agent with host:", host, "| Identity:", !!identity, "| Local:", isLocal)
 
-  // Create a custom fetch function that handles CORS and credentials
+  // Simple fetch function for local development
   const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     
-    if (url && url.toString().includes(host)) {
-      const requestUrl = new URL(url.toString())
-      const isStatusEndpoint = requestUrl.pathname.endsWith('/api/v2/status')
-      const isQueryEndpoint = requestUrl.pathname.includes('/query')
-      
-      // Check if this is a preflight request
-      const isPreflight = init?.method === 'OPTIONS' || 
-                         (init?.headers && 'access-control-request-method' in init.headers)
-      
-      // Create request headers
-      const headers = new Headers(init?.headers)
-      
-      // For non-preflight requests, set the content type
-      if (!isPreflight) {
-        headers.set('Content-Type', 'application/cbor')
-      }
-      
-      // Configure request based on type
-      const requestInit: RequestInit = {
-        ...init,
-        headers,
-        // Important: For CORS with credentials, we must set a specific origin
-        // Never send credentials with preflight or status endpoint
-        credentials: (isPreflight || isStatusEndpoint) ? 'omit' : 'include',
-        mode: 'cors',
-        cache: 'no-store',
-        // For preflight, we need to ensure we don't send a body
-        ...(isPreflight ? { 
-          method: 'OPTIONS', 
-          body: undefined,
-          // Add CORS headers that the server should respond to
-          headers: {
-            ...Object.fromEntries(headers.entries()),
-            'Access-Control-Request-Method': 'POST',
-            'Access-Control-Request-Headers': 'content-type',
-            'Origin': 'http://localhost:3000'
-          }
-        } : {})
-      }
-      
-      // For non-preflight requests, ensure we have the right headers
-      if (!isPreflight) {
-        headers.set('X-Requested-With', 'XMLHttpRequest')
-      }
-
-      try {
-        // Make the actual request
-        const response = await fetch(input.toString(), requestInit)
-        
-        // Log CORS headers for debugging
-        if (isLocal) {
-          const corsHeaders = {
-            'access-control-allow-origin': response.headers.get('access-control-allow-origin'),
-            'access-control-allow-credentials': response.headers.get('access-control-allow-credentials'),
-            'access-control-allow-methods': response.headers.get('access-control-allow-methods'),
-            'access-control-allow-headers': response.headers.get('access-control-allow-headers'),
-            'vary': response.headers.get('vary')
-          }
-          console.log('Response Headers for', requestUrl.pathname, ':', corsHeaders)
-          
-          // If we get a CORS error, log more details
-          if (!response.ok) {
-            console.error('Request failed with status:', response.status, response.statusText)
-            try {
-              const errorText = await response.text()
-              console.error('Error response:', errorText)
-            } catch (e) {
-              console.error('Could not read error response body:', e)
-            }
-          }
-        }
-        
-        return response
-      } catch (error) {
-        console.error('Fetch error:', error)
-        console.error('Request URL:', url)
-        console.error('Request Init:', {
-          ...requestInit,
-          // Don't log the actual body as it might be large
-          body: requestInit.body ? '[body]' : undefined
-        })
-        throw error
-      }
+    // Create headers
+    const headers = new Headers(init?.headers)
+    headers.set('Content-Type', 'application/cbor')
+    
+    // Configure request
+    const requestInit: RequestInit = {
+      ...init,
+      headers,
+      mode: 'cors',
+      credentials: 'include',
+      cache: 'no-store'
     }
 
-    // For non-IC requests, use the default fetch
-    return fetch(input, init)
+    try {
+      // Make the request
+      const response = await fetch(input.toString(), requestInit);
+      
+      // Log response details for debugging
+      if (isLocal) {
+        console.log('Response status:', response.status, response.statusText);
+        console.log('Request URL:', url);
+      }
+      
+      // Handle errors
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Request failed:', response.status, response.statusText, errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+      
+      return response;
+      
+    } catch (error) {
+      console.error('Fetch error:', error);
+      console.error('Request URL:', url);
+      console.error('Request Init:', {
+        ...requestInit,
+        // Don't log the actual body as it might be large
+        body: requestInit.body ? '[body]' : undefined
+      });
+      throw error;
+    }
   }
 
+  // Create and configure the HTTP agent
   const agent = new HttpAgent({
     host,
     identity,
     fetch: customFetch,
-    // For local development, disable verification and set appropriate options
-    verifyQuerySignatures: !isLocal,
-    // Disable fetch root key in local development as we're not verifying signatures
-    // The replica will handle the root key automatically
-    ...(isLocal ? { verifyQuerySignatures: false } : {})
-  })
+    verifyQuerySignatures: false // Disable verification for local development
+  });
 
   if (isLocal) {
     console.log("Running in local development mode - skipping root key fetch")

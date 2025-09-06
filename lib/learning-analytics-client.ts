@@ -1,7 +1,7 @@
 import { Actor, HttpAgent, Identity } from "@dfinity/agent"
 import { idlFactory } from "./ic/learning-analytics.idl"
 
-const LEARNING_ANALYTICS_CANISTER_ID = "bkyz2-fmaaa-aaaaa-qaaaq-cai"
+const LEARNING_ANALYTICS_CANISTER_ID = "lz3um-vp777-77777-aaaba-cai"
 
 // Host configuration
 const isLocal = typeof window !== "undefined" && 

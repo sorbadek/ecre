@@ -1,17 +1,18 @@
 import { Actor, HttpAgent, AnonymousIdentity } from "@dfinity/agent"
-import { useAuth } from "./auth-context"
+import { getIdentity } from "./ic/agent"
 import { idlFactory } from "./ic/notifications.idl"
+import { Principal } from "@dfinity/principal"
+import { IDL } from "@dfinity/candid"
 
 // Notifications canister ID - local development
-export const NOTIFICATIONS_CANISTER_ID = "bd3sg-teaaa-aaaaa-qaaba-cai"
+export const NOTIFICATIONS_CANISTER_ID = "l62sy-yx777-77777-aaabq-cai"
 
 // Host configuration
 const isLocal = typeof window !== "undefined" && 
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
 
-// For local development, use port 4943 to match the deployment configuration
 const HOST = isLocal 
-  ? "http://127.0.0.1:4943"  // Using port 4943 to match deployment
+  ? "http://127.0.0.1:4943"
   : "https://ic0.app"
 
 console.log('Notifications client initialized with host:', HOST)
@@ -46,6 +47,7 @@ export interface NotificationPreferences {
   emailNotifications: boolean;
   inAppNotifications: boolean;
   pushNotifications: boolean;
+  marketingEmails?: boolean;
 }
 
 class NotificationsClient {
@@ -110,17 +112,23 @@ class NotificationsClient {
       const actor = await this.getActor();
       if (!actor) throw new Error("Actor not available");
 
-      const result = await actor.createActivity({
+      const result = await actor.createActivity(
         activityType,
         title,
-        description: description ? [description] : [],
-        metadata: metadata ? [metadata] : [],
-        priority,
-        expiresAt: expiresAt ? [expiresAt] : [],
-      });
+        description ? [description] : [],
+        metadata ? [metadata] : [],
+        BigInt(priority),
+        expiresAt ? [BigInt(expiresAt)] : []
+      );
 
       if ("ok" in result) {
-        return result.ok;
+        return {
+          ...result.ok,
+          id: result.ok.id.toString(),
+          userId: result.ok.userId.toString(),
+          timestamp: BigInt(result.ok.timestamp.toString()),
+          expiresAt: result.ok.expiresAt ? BigInt(result.ok.expiresAt.toString()) : undefined
+        };
       } else {
         throw new Error(result.err);
       }
@@ -130,52 +138,53 @@ class NotificationsClient {
     }
   }
 
-  async getMyActivities(limit: number = 10): Promise<Activity[]> {
-    const actor = await this.getActor();
-    if (!actor) {
-      throw new Error('Failed to initialize actor');
-    }
-
-    console.log(`Fetching activities with limit: ${limit}`);
-    
-    // For optional Nat parameters, we need to use an array with 0 or 1 elements
-    const limitParam = limit > 0 ? [BigInt(limit)] : [];
-    console.log('Calling getMyActivities with limit:', limitParam);
-    
-    const result = await actor.getMyActivities(limitParam);
-    
-    if (!Array.isArray(result)) {
-      throw new Error('Unexpected result format from canister');
-    }
-    
-    // Ensure each activity has all required fields with proper types
-    return result.map(activity => ({
-      id: activity.id?.toString() || '',
-      userId: activity.userId?.toString() || '',
-      activityType: activity.activityType || { system_update: null },
-      title: activity.title?.toString() || '',
-      description: activity.description?.toString(),
-      metadata: activity.metadata?.toString(),
-      timestamp: activity.timestamp ? BigInt(activity.timestamp.toString()) : BigInt(0),
-      priority: typeof activity.priority === 'number' ? activity.priority : 1,
-      isRead: !!activity.isRead,
-      expiresAt: activity.expiresAt ? BigInt(activity.expiresAt.toString()) : undefined
-    }));
-  }
-
-  async markActivityAsRead(activityId: string): Promise<Activity> {
+  async getActivities(limit: number = 10, offset: number = 0): Promise<Activity[]> {
     try {
       const actor = await this.getActor();
       if (!actor) throw new Error("Actor not available");
-
-      const result = await actor.markActivityAsRead(activityId);
-      if ("ok" in result) {
-        return result.ok;
-      } else {
-        throw new Error(result.err);
+      
+      // Use getMyActivities which is the actual method in the canister
+      const result = await actor.getMyActivities(BigInt(limit));
+      
+      if (Array.isArray(result)) {
+        return result.map((activity: any) => ({
+          id: activity.id,
+          userId: activity.userId.toString(),
+          activityType: activity.activityType,
+          title: activity.title,
+          description: activity.description?.[0],
+          metadata: activity.metadata?.[0],
+          timestamp: activity.timestamp,
+          priority: 1, // Default priority since it's not in the canister
+          isRead: activity.isRead,
+          expiresAt: activity.expiresAt?.[0]
+        }));
       }
+      return [];
+    } catch (error) {
+      console.error("Error getting activities:", error);
+      return [];
+    }
+  }
+
+  async markAsRead(activityId: string): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      await actor.markAsRead(activityId);
     } catch (error) {
       console.error("Error marking activity as read:", error);
+      throw error;
+    }
+  }
+
+  async markAllAsRead(): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      await actor.markAllAsRead();
+    } catch (error) {
+      console.error("Error marking all as read:", error);
       throw error;
     }
   }
@@ -184,78 +193,144 @@ class NotificationsClient {
     try {
       const actor = await this.getActor();
       if (!actor) return 0;
-
       const count = await actor.getUnreadCount();
       return Number(count);
     } catch (error) {
-      console.warn("Error getting unread count:", error);
+      console.error("Error getting unread count:", error);
       return 0;
     }
   }
 
-
-  async updatePreferences(
-    emailNotifications: boolean,
-    inAppNotifications: boolean,
-    pushNotifications: boolean,
-    weeklyDigest: boolean,
-    activityTypes: ActivityType[]
-  ): Promise<NotificationPreferences> {
+  async deleteActivity(activityId: string): Promise<void> {
     try {
       const actor = await this.getActor();
       if (!actor) throw new Error("Actor not available");
-
-      const result = await actor.updatePreferences({
-        emailNotifications,
-        inAppNotifications,
-        pushNotifications,
-        weeklyDigest,
-        activityTypes,
-      });
-
-      if ("ok" in result) {
-        return result.ok;
-      } else {
-        throw new Error(result.err);
-      }
+      await actor.deleteActivity(activityId);
     } catch (error) {
-      console.error("Error updating preferences:", error);
+      console.error("Error deleting activity:", error);
       throw error;
     }
   }
 
-  async getMyPreferences(): Promise<NotificationPreferences | null> {
+  async getActivity(activityId: string): Promise<Activity | null> {
     try {
       const actor = await this.getActor();
-      if (!actor) return null;
-
-      const result = await actor.getMyPreferences();
-      return result[0] || null;
+      if (!actor) throw new Error("Actor not available");
+      
+      const result = await actor.getActivity(activityId);
+      
+      if ("ok" in result) {
+        return {
+          ...result.ok,
+          id: result.ok.id.toString(),
+          userId: result.ok.userId.toString(),
+          timestamp: BigInt(result.ok.timestamp.toString()),
+          expiresAt: result.ok.expiresAt ? BigInt(result.ok.expiresAt.toString()) : undefined
+        };
+      }
+      return null;
     } catch (error) {
-      console.error("Error getting preferences:", error);
+      console.error("Error getting activity:", error);
       return null;
     }
   }
 
-  async cleanupExpiredActivities(): Promise<number> {
+  async updateNotificationPreferences(prefs: Partial<NotificationPreferences>): Promise<void> {
     try {
       const actor = await this.getActor();
-      if (!actor) return 0;
-
-      const result = await actor.cleanupExpiredActivities();
-      if ("ok" in result) {
-        return Number(result.ok);
+      if (!actor) throw new Error("Actor not available");
+      
+      // Check if the method exists before calling it
+      if (typeof actor.updateNotificationPreferences === 'function') {
+        const currentPrefs = await this.getNotificationPreferences();
+        const updatedPrefs = {
+          ...currentPrefs,
+          ...prefs,
+          userId: this.identity?.getPrincipal()?.toString() || ""
+        };
+        
+        await actor.updateNotificationPreferences(updatedPrefs);
       } else {
-        throw new Error(result.err);
+        console.warn("updateNotificationPreferences not implemented in canister, using local storage");
+        // Store preferences in local storage as a fallback
+        const userId = this.identity?.getPrincipal()?.toString();
+        if (userId) {
+          const key = `notifications_prefs_${userId}`;
+          localStorage.setItem(key, JSON.stringify(prefs));
+        }
       }
+    } catch (error) {
+      console.error("Error updating notification preferences:", error);
+      // Don't throw error since this is a non-critical feature
+    }
+  }
+
+  async getNotificationPreferences(): Promise<NotificationPreferences> {
+    // Return default preferences since this method is not implemented in the canister
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      
+      // Check if the method exists before calling it
+      if (typeof actor.getNotificationPreferences === 'function') {
+        const result = await actor.getNotificationPreferences();
+        if ("ok" in result) {
+          return result.ok;
+        } else {
+          console.warn("Error in getNotificationPreferences:", result.err);
+        }
+      }
+      
+      // Return default preferences
+      return {
+        userId: this.identity?.getPrincipal()?.toString() || "",
+        activityTypes: [
+          { comment: null },
+          { quiz_completed: null },
+          { deadline_approaching: null },
+          { course_available: null },
+          { achievement_earned: null },
+          { session_joined: null },
+          { partner_request: null },
+          { system_update: null }
+        ],
+        weeklyDigest: true,
+        emailNotifications: true,
+        inAppNotifications: true,
+        pushNotifications: true
+      };
+    } catch (error) {
+      console.error("Error in getNotificationPreferences:", error);
+      // Return default preferences on error
+      return {
+        userId: this.identity?.getPrincipal()?.toString() || "",
+        activityTypes: [],
+        weeklyDigest: true,
+        emailNotifications: true,
+        inAppNotifications: true,
+        pushNotifications: true
+      };
+    }
+  }
+
+  async cleanupExpiredActivities(): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      await actor.cleanupExpiredActivities();
     } catch (error) {
       console.error("Error cleaning up expired activities:", error);
       throw error;
     }
   }
 
+  // Helper method for backward compatibility
+  async getMyActivities(limit: number = 10): Promise<Activity[]> {
+    return this.getActivities(limit, 0);
+  }
 }
 
 // Export a single instance of NotificationsClient
 const notificationsClient = new NotificationsClient();
+
 export { notificationsClient };

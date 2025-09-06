@@ -11,6 +11,43 @@ export const SESSIONS_CANISTER_ID = "lm4fb-uh777-77777-aaacq-cai" // Local sessi
 export const SOCIAL_CANISTER_ID = "lf7o5-cp777-77777-aaada-cai" // Local social canister
 export const ASSET_CANISTER_ID = "lqy7q-dh777-77777-aaaaq-cai" // Local UI/asset canister
 
+// Simple fetch implementation
+const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  
+  const requestInit: RequestInit = {
+    ...init,
+    headers: {
+      ...init?.headers,
+      'Content-Type': 'application/cbor'
+    },
+    cache: 'no-store'
+  };
+
+  try {
+    const response = await fetch(url, requestInit);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Request failed:', {
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText
+      });
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+    
+    return response;
+  } catch (error) {
+    console.error('Fetch error:', {
+      url,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
+};
+
 export function detectIcHost(): string {
   // Always use port 4943 to match the IC replica's expected port
   const host = "http://127.0.0.1:4943"
@@ -49,16 +86,17 @@ export async function getAgent(identity?: Identity): Promise<HttpAgent> {
       console.warn('No identity provided and no authenticated user found')
     }
 
-    // Create agent with proper configuration
+    // Create agent with simplified configuration
     const agent = new HttpAgent({ 
       host,
-      identity: effectiveIdentity || undefined
+      identity: effectiveIdentity || undefined,
+      fetch: customFetch
     });
     
     // Configure agent options
-    // @ts-ignore - The verifyQuerySignatures option exists but isn't in the type definitions
+    // @ts-expect-error - The _options property exists but isn't in the type definitions
     if (agent._options) {
-      // @ts-ignore
+      // @ts-expect-error - The verifyQuerySignatures option exists but isn't in the type definitions
       agent._options.verifyQuerySignatures = false;
     }
 
@@ -83,55 +121,7 @@ export async function getAgent(identity?: Identity): Promise<HttpAgent> {
       }
     }
     
-    // Create a custom fetch wrapper for better error handling
-    const originalFetch = (agent as any)._fetch as typeof fetch;
-    (agent as any)._fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
-      const isLocalRequest = url.includes('127.0.0.1') || url.includes('localhost')
-      
-      // Prepare headers
-      const headers = new Headers(init?.headers)
-      headers.set('Content-Type', 'application/cbor')
-      
-      // Add CORS headers for local development
-      if (isLocalRequest) {
-        headers.set('Access-Control-Allow-Origin', '*')
-        headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        headers.set('Access-Control-Allow-Credentials', 'true')
-      }
-
-      const requestInit: RequestInit = {
-        ...init,
-        headers: Object.fromEntries(headers.entries()),
-        mode: isLocalRequest ? 'cors' : 'same-origin',
-        credentials: isLocalRequest ? 'omit' : 'include',
-        cache: 'no-store'
-      }
-
-      try {
-        const response = await originalFetch(url, requestInit)
-        
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error('Request failed:', {
-            url,
-            status: response.status,
-            statusText: response.statusText,
-            error: errorText
-          })
-          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`)
-        }
-        
-        return response
-      } catch (error) {
-        console.error('Fetch error:', {
-          url,
-          error: error instanceof Error ? error.message : String(error)
-        })
-        throw error
-      }
-    }
+    // Using our custom fetch implementation via the agent options
     
     return agent;
   } catch (error) {

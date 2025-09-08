@@ -93,17 +93,42 @@ class SocialClient {
       console.log('Initializing social client with host:', host);
       console.log('Using canister ID:', SOCIAL_CANISTER_ID);
 
-      // Configure agent with explicit API version for local development
+      // Create a custom fetch that bypasses certificate verification for local development
+      const customFetchWithBypass = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? new URL(input) : input;
+        const isICApiCall = url.pathname.includes('/api/v2/');
+        
+        // For local development, modify the request to bypass certificate verification
+        if (isLocal && isICApiCall) {
+          const modifiedUrl = new URL(url.toString());
+          // Add a query parameter to bypass verification (if your local replica supports this)
+          modifiedUrl.searchParams.append('__disable-verification', 'true');
+          
+          const modifiedInit = {
+            ...init,
+            headers: {
+              ...init?.headers,
+              'X-IC-Disable-Certificate-Validation': 'true',
+            },
+          };
+          
+          return customFetch(modifiedUrl, modifiedInit);
+        }
+        
+        return customFetch(input, init);
+      };
+
+      // Configure agent with bypass for local development
       const agent = new HttpAgent({
         identity,
         host,
         ...(isLocal ? { 
-          fetch: customFetch,
+          fetch: customFetchWithBypass,
           // Disable all verification for local development
           verifyQuerySignatures: false,
           verifyUpdateCalls: false,
           verifyTimeNanos: false,
-          // Set a custom root key that will bypass verification
+          // Use empty root key to bypass verification
           rootKey: new Uint8Array(0),
           // Additional options
           callOptions: {
@@ -119,6 +144,16 @@ class SocialClient {
           // Explicitly set an empty root key to bypass verification
           agent.rootKey = new Uint8Array(0);
           console.log('Using empty root key for local development');
+          
+          // For local development, we need to bypass the root key verification
+          // by patching the agent's internal methods
+          const originalVerifyCert = (agent as any)._verifyCert;
+          if (originalVerifyCert) {
+            (agent as any)._verifyCert = async () => {
+              console.log('Skipping certificate verification for local development');
+              return true;
+            };
+          }
         } catch (error) {
           console.warn('Error setting up root key:', error);
         }

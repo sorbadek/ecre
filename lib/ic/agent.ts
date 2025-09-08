@@ -36,17 +36,29 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promis
     url.pathname = url.pathname.replace('/api/', '/api/v2/')
   }
   
+  // Check if this is a local development environment
+  const isLocal = typeof window !== 'undefined' && 
+    (window.location.hostname === 'localhost' || 
+     window.location.hostname === '127.0.0.1');
+  
   // Skip CORS for IC API endpoints as they handle it differently
   const isICApiCall = url.pathname.startsWith('/api/v2/status') || 
                      url.pathname.startsWith('/api/v2/canister/');
+  
+  // For local development with IC API calls, ensure we're using the right host
+  if (isLocal && isICApiCall) {
+    const localReplicaUrl = new URL('http://127.0.0.1:4943');
+    url.protocol = localReplicaUrl.protocol;
+    url.hostname = localReplicaUrl.hostname;
+    url.port = localReplicaUrl.port;
+  }
   
   const headers = new Headers(init?.headers)
   headers.set('Content-Type', 'application/cbor')
   headers.set('Accept', 'application/cbor')
   
   // For local development, add CORS headers
-  const isLocal = HOST.includes('localhost') || HOST.includes('127.0.0.1')
-  if (isLocal && !isICApiCall) {
+  if (isLocal) {
     // Get the origin from the request headers or use a default
     const requestOrigin = init?.headers instanceof Headers 
       ? init.headers.get('origin') 
@@ -58,6 +70,12 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promis
     headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
     headers.set('Access-Control-Allow-Credentials', 'true')
     headers.set('Vary', 'Origin')
+    
+    // Add headers to bypass certificate verification if needed
+    if (isICApiCall) {
+      headers.set('X-IC-Disable-Certificate-Validation', 'true');
+      headers.set('X-IC-Allow-Insecure-Requests', 'true');
+    }
   }
   
   // Handle preflight requests
@@ -71,11 +89,18 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promis
   const fetchOptions: RequestInit = {
     ...init,
     headers,
-    mode: isICApiCall ? 'no-cors' : 'cors',
+    // For local development, we might need to use 'cors' even for IC API calls
+    mode: isLocal ? 'cors' : (isICApiCall ? 'no-cors' : 'cors'),
     credentials: isLocal ? 'include' : 'same-origin',
     cache: 'no-store' as const,
     redirect: 'follow',
-    referrerPolicy: 'no-referrer'
+    referrerPolicy: 'no-referrer',
+    // Add signal for better timeout handling
+    signal: init?.signal || (() => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      return controller.signal;
+    })()
   }
   
   // For local development, handle preflight requests

@@ -78,47 +78,64 @@ class SocialClient {
     }
 
     try {
+      if (!this.identity) {
+        throw new Error('No identity available. Please authenticate first.');
+      }
+
       const identity = this.identity;
+      console.log('[SocialClient] Using identity principal:', identity.getPrincipal().toText());
 
-      console.log('Using identity principal:', identity.getPrincipal().toText());
-
-      // Use the same host configuration as notifications client
+      // Determine if we're in a local development environment
       const isLocal = typeof window !== "undefined" && 
         (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
       
+      // Use the same host configuration as the rest of the application
       const host = isLocal 
-        ? "http://127.0.0.1:4943"  // Using port 4943 to match deployment
+        ? "http://127.0.0.1:4943"  // Local replica port
         : "https://ic0.app";
 
-      console.log('Initializing social client with host:', host);
-      console.log('Using canister ID:', SOCIAL_CANISTER_ID);
+      console.log('[SocialClient] Initializing with host:', host);
+      console.log('[SocialClient] Using canister ID:', SOCIAL_CANISTER_ID);
 
-      // Create a custom fetch that bypasses certificate verification for local development
+      // Create a custom fetch handler for local development
       const customFetchWithBypass = async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = typeof input === 'string' ? new URL(input) : input;
-        const isICApiCall = url.pathname.includes('/api/v2/');
-        
-        // For local development, modify the request to bypass certificate verification
-        if (isLocal && isICApiCall) {
-          const modifiedUrl = new URL(url.toString());
-          // Add a query parameter to bypass verification (if your local replica supports this)
-          modifiedUrl.searchParams.append('__disable-verification', 'true');
+        try {
+          // Handle both string URLs and Request objects
+          const url = new URL(
+            input instanceof Request ? input.url : input.toString(),
+            typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+          );
+          const isICApiCall = url.pathname.includes('/api/v2/');
           
-          const modifiedInit = {
-            ...init,
-            headers: {
-              ...init?.headers,
-              'X-IC-Disable-Certificate-Validation': 'true',
-            },
-          };
+          // For local development, modify the request to bypass certificate verification
+          if (isLocal && isICApiCall) {
+            const modifiedUrl = new URL(url.toString());
+            modifiedUrl.searchParams.append('__disable-verification', 'true');
+            
+            const modifiedInit: RequestInit = {
+              ...init,
+              headers: {
+                ...init?.headers,
+                'X-IC-Disable-Certificate-Validation': 'true',
+                'X-IC-Allow-Insecure-Requests': 'true',
+              },
+              credentials: 'include' as const,
+              mode: 'cors',
+              cache: 'no-cache',
+            };
+            
+            console.log(`[SocialClient] Making request to: ${modifiedUrl.toString()}`);
+            return await customFetch(modifiedUrl, modifiedInit);
+          }
           
-          return customFetch(modifiedUrl, modifiedInit);
+          return await customFetch(input, init);
+        } catch (error) {
+          console.error('[SocialClient] Error in custom fetch:', error);
+          throw error;
         }
-        
-        return customFetch(input, init);
       };
 
-      // Configure agent with bypass for local development
+      // Configure the HTTP agent
       const agent = new HttpAgent({
         identity,
         host,
@@ -141,30 +158,42 @@ class SocialClient {
 
       if (isLocal) {
         try {
-          // Explicitly set an empty root key to bypass verification
-          agent.rootKey = new Uint8Array(0);
-          console.log('Using empty root key for local development');
-          
-          // For local development, we need to bypass the root key verification
-          // by patching the agent's internal methods
-          const originalVerifyCert = (agent as any)._verifyCert;
-          if (originalVerifyCert) {
-            (agent as any)._verifyCert = async () => {
-              console.log('Skipping certificate verification for local development');
-              return true;
-            };
-          }
+          console.log('[SocialClient] Fetching root key...');
+          // First try to fetch the root key
+          await agent.fetchRootKey();
+          console.log('[SocialClient] Successfully fetched root key');
         } catch (error) {
-          console.warn('Error setting up root key:', error);
+          console.warn('[SocialClient] Failed to fetch root key, patching agent to bypass verification', error);
+          // If fetching fails, patch the agent to bypass verification
+         (agent as any)._verifyCert = async () => true;
         }
       }
 
-      this.actor = Actor.createActor(idlFactory, {
-        agent,
-        canisterId: SOCIAL_CANISTER_ID,
-      })
+      try {
+        console.log('[SocialClient] Creating actor...');
+        // Create the actor with the configured agent
+        this.actor = Actor.createActor(idlFactory, {
+          agent,
+          canisterId: SOCIAL_CANISTER_ID,
+        });
 
-      return this.actor
+        // Test the actor with a simple query
+        if (isLocal) {
+          try {
+            console.log('[SocialClient] Testing actor connection...');
+            await this.actor.whoami();
+            console.log('[SocialClient] Actor connection test successful');
+          } catch (testError) {
+            console.warn('[SocialClient] Actor connection test failed, but continuing', testError);
+          }
+        }
+
+        return this.actor;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        console.error('[SocialClient] Failed to create actor:', error);
+        throw new Error(`Failed to initialize actor: ${errorMessage}`);
+      }
     } catch (error) {
       console.warn("Failed to create social actor:", error)
       return null

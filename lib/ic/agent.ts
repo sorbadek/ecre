@@ -28,12 +28,13 @@ export const AUTH_CONFIG = {
 }
 
 // Custom fetch with CBOR and CORS support
-const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const url = new URL(input.toString())
+export const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  // Create URL object from input
+  const requestUrl = new URL(input.toString())
   
   // Ensure we're using the correct API version
-  if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/v2/')) {
-    url.pathname = url.pathname.replace('/api/', '/api/v2/')
+  if (requestUrl.pathname.startsWith('/api/') && !requestUrl.pathname.startsWith('/api/v2/')) {
+    requestUrl.pathname = requestUrl.pathname.replace('/api/', '/api/v2/')
   }
   
   // Check if this is a local development environment
@@ -41,105 +42,156 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promis
     (window.location.hostname === 'localhost' || 
      window.location.hostname === '127.0.0.1');
   
-  // Skip CORS for IC API endpoints as they handle it differently
-  const isICApiCall = url.pathname.startsWith('/api/v2/status') || 
-                     url.pathname.startsWith('/api/v2/canister/');
+  // Determine if this is an IC API call
+  const isICApiCall = requestUrl.pathname.startsWith('/api/v2/status') || 
+                     requestUrl.pathname.startsWith('/api/v2/canister/');
   
-  // For local development with IC API calls, ensure we're using the right host
+  // For local development with IC API calls, ensure we're using the right host and protocol
   if (isLocal && isICApiCall) {
     const localReplicaUrl = new URL('http://127.0.0.1:4943');
-    url.protocol = localReplicaUrl.protocol;
-    url.hostname = localReplicaUrl.hostname;
-    url.port = localReplicaUrl.port;
+    requestUrl.protocol = localReplicaUrl.protocol;
+    requestUrl.hostname = localReplicaUrl.hostname;
+    requestUrl.port = localReplicaUrl.port;
+    
+    // Add no-cache headers for IC API calls
+    requestUrl.searchParams.set('_', Date.now().toString());
   }
   
-  const headers = new Headers(init?.headers)
-  headers.set('Content-Type', 'application/cbor')
-  headers.set('Accept', 'application/cbor')
+  // Create new headers object
+  const headers = new Headers(init?.headers);
   
-  // For local development, add CORS headers
+  // Set default headers
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/cbor');
+  }
+  if (!headers.has('Accept')) {
+    headers.set('Accept', 'application/cbor');
+  }
+  
+  // For local development, handle CORS and other headers
   if (isLocal) {
-    // Get the origin from the request headers or use a default
-    const requestOrigin = init?.headers instanceof Headers 
-      ? init.headers.get('origin') 
-      : (init?.headers as any)?.origin || 'http://localhost:3000'
+    // Get the origin from the request or use the current origin
+    const requestOrigin = typeof window !== 'undefined' 
+      ? window.location.origin 
+      : init?.headers instanceof Headers 
+        ? init.headers.get('origin') 
+        : (init?.headers as any)?.origin || 'http://localhost:3000';
     
-    // Set specific origin instead of wildcard when credentials are included
-    headers.set('Access-Control-Allow-Origin', requestOrigin)
-    headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-    headers.set('Access-Control-Allow-Credentials', 'true')
-    headers.set('Vary', 'Origin')
+    // Set CORS headers
+    if (requestOrigin) {
+      headers.set('Origin', requestOrigin);
+    }
     
-    // Add headers to bypass certificate verification if needed
+    // For IC API calls, add special headers
     if (isICApiCall) {
+      // These headers help with local development
       headers.set('X-IC-Disable-Certificate-Validation', 'true');
       headers.set('X-IC-Allow-Insecure-Requests', 'true');
+      
+      // Add cache-busting for status endpoint
+      if (requestUrl.pathname.endsWith('/status')) {
+        requestUrl.searchParams.set('_', Date.now().toString());
+      }
     }
+  }
+  
+  // For local development, ensure we're not sending any sensitive headers
+  if (isLocal) {
+    // Remove any potentially problematic headers
+    headers.delete('Sec-Fetch-Dest');
+    headers.delete('Sec-Fetch-Mode');
+    headers.delete('Sec-Fetch-Site');
   }
   
   // Handle preflight requests
-  if (init?.method === 'OPTIONS' && !isICApiCall) {
-    return new Response(null, {
-      status: 204,
-      headers: Object.fromEntries(headers.entries())
-    })
-  }
-  
-  const fetchOptions: RequestInit = {
-    ...init,
-    headers,
-    // For local development, we might need to use 'cors' even for IC API calls
-    mode: isLocal ? 'cors' : (isICApiCall ? 'no-cors' : 'cors'),
-    credentials: isLocal ? 'include' : 'same-origin',
-    cache: 'no-store' as const,
-    redirect: 'follow',
-    referrerPolicy: 'no-referrer',
-    // Add signal for better timeout handling
-    signal: init?.signal || (() => {
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      return controller.signal;
-    })()
-  }
-  
-  // For local development, handle preflight requests
-  if (HOST.includes('localhost') || HOST.includes('127.0.0.1')) {
-    try {
-      const response = await fetch(url.toString(), {
-        ...fetchOptions,
-        method: 'OPTIONS',
-        headers: {
-          ...Object.fromEntries(headers.entries()),
-          'Access-Control-Request-Method': init?.method || 'GET',
-          'Access-Control-Request-Headers': 'content-type',
-        },
-        body: undefined
-      })
+  if (init?.method === 'OPTIONS') {
+    // For local development, respond to preflight requests
+    if (isLocal) {
+      const responseHeaders = new Headers({
+        'Access-Control-Allow-Origin': headers.get('Origin') || '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+        'Access-Control-Allow-Credentials': 'true',
+        'Vary': 'Origin',
+      });
       
-      if (!response.ok) {
-        console.warn('Preflight request failed:', response.status, response.statusText)
-      }
-    } catch (error) {
-      console.warn('Error during preflight request:', error)
+      return new Response(null, {
+        status: 204,
+        headers: Object.fromEntries(responseHeaders.entries())
+      });
+    }
+    
+    // For non-local or IC API calls, let the request through
+    if (!isICApiCall) {
+      return new Response(null, {
+        status: 204,
+        headers: Object.fromEntries(headers.entries())
+      });
     }
   }
   
-  // Make the actual request
-  const response = await fetch(url.toString(), fetchOptions)
-  
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'No error details')
-    console.error('API Error:', {
-      status: response.status,
-      statusText: response.statusText,
-      url: url.toString(),
-      error: errorText
-    })
-    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`)
+  // Prepare fetch options
+  const fetchOptions: RequestInit = {
+    ...init,
+    headers,
+    credentials: 'include' as const,
+    mode: 'cors',
+    cache: 'no-cache',
+    // Add timeout for local development
+    signal: init?.signal || (() => {
+      if (isLocal) {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        return controller.signal;
+      }
+      return undefined;
+    })()
+  };
+
+  // Make the actual fetch request
+  try {
+    const response = await fetch(requestUrl.toString(), fetchOptions);
+    
+    // For local development, ensure CORS headers are set in the response
+    if (isLocal) {
+      const responseHeaders = new Headers(response.headers);
+      
+      // Ensure CORS headers are present in the response
+      if (!responseHeaders.has('Access-Control-Allow-Origin')) {
+        responseHeaders.set('Access-Control-Allow-Origin', headers.get('Origin') || '*');
+      }
+      if (!responseHeaders.has('Access-Control-Allow-Credentials')) {
+        responseHeaders.set('Access-Control-Allow-Credentials', 'true');
+      }
+      
+      // Create a new response with the modified headers
+      if (response.body) {
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders
+        });
+      }
+    }
+    
+    // Check for error responses
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'No error details');
+      console.error('API Error:', {
+        status: response.status,
+        statusText: response.statusText,
+        url: requestUrl.toString(),
+        error: errorText
+      });
+      
+      throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+    }
+    
+    return response;
+  } catch (error) {
+    console.error('Fetch error:', error);
+    throw error;
   }
-  
-  return response
 }
 
 // Initialize AuthClient

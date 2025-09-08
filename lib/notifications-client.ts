@@ -5,7 +5,7 @@ import { Principal } from "@dfinity/principal"
 import { IDL } from "@dfinity/candid"
 
 // Notifications canister ID - local development
-export const NOTIFICATIONS_CANISTER_ID = "l62sy-yx777-77777-aaabq-cai"
+export const NOTIFICATIONS_CANISTER_ID = "bd3sg-teaaa-aaaaa-qaaba-cai"
 
 // Host configuration
 const isLocal = typeof window !== "undefined" && 

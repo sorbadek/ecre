@@ -5,7 +5,7 @@ import { idlFactory } from "./ic/sessions.idl"
 import { _SERVICE } from "./ic/sessions"
 
 // Session canister ID - using the provided canister ID
-const SESSIONS_CANISTER_ID = "lm4fb-uh777-77777-aaacq-cai";
+const SESSIONS_CANISTER_ID = "br5f7-7uaaa-aaaaa-qaaca-cai";
 
 // Host configuration
 const isLocal = typeof window !== "undefined" && 

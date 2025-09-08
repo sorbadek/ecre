@@ -17,7 +17,6 @@ const kalam = Kalam({
 export const metadata: Metadata = {
   title: 'PeerVerse - Learn Together, Grow Forever',
   description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
-    generator: 'v0.app'
 }
 
 export default function RootLayout({

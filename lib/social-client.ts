@@ -2,9 +2,9 @@ import { Actor, HttpAgent, type Identity } from "@dfinity/agent"
 import { AuthClient } from "@dfinity/auth-client"
 import { idlFactory } from "./ic/social.idl"
 import { Principal } from "@dfinity/principal"
-import { getIdentity } from "./ic/agent"
+import { getIdentity, customFetch } from "./ic/agent"
 
-const SOCIAL_CANISTER_ID = "lf7o5-cp777-77777-aaada-cai"
+const SOCIAL_CANISTER_ID = "bw4dl-smaaa-aaaaa-qaacq-cai"
 
 export interface PartnerProfile {
   principal: string
@@ -97,17 +97,30 @@ class SocialClient {
       const agent = new HttpAgent({
         identity,
         host,
-        // Force API v2 for local development
-        ...(isLocal ? { _agent: { _host: { origin: host, protocol: 'http:' } } } : {})
+        ...(isLocal ? { 
+          fetch: customFetch,
+          // Disable all verification for local development
+          verifyQuerySignatures: false,
+          verifyUpdateCalls: false,
+          verifyTimeNanos: false,
+          // Set a custom root key that will bypass verification
+          rootKey: new Uint8Array(0),
+          // Additional options
+          callOptions: {
+            http_request_timeout_ms: 30000, // 30 second timeout
+          },
+          retryTimes: 2,
+          maxResponseBytes: 1024 * 1024 * 10, // 10MB
+        } : {})
       });
 
       if (isLocal) {
         try {
-          await agent.fetchRootKey();
-          console.log('Successfully fetched root key for local development');
+          // Explicitly set an empty root key to bypass verification
+          agent.rootKey = new Uint8Array(0);
+          console.log('Using empty root key for local development');
         } catch (error) {
-          console.warn('Failed to fetch root key:', error);
-          // Even if root key fetch fails, we can still proceed in most cases
+          console.warn('Error setting up root key:', error);
         }
       }
 

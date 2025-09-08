@@ -1,140 +1,196 @@
 import { HttpAgent, Actor, type Identity, type ActorSubclass } from "@dfinity/agent"
-import { AuthClient } from "@dfinity/auth-client"
 import type { IDL } from "@dfinity/candid"
-import { idlFactory as userProfileIdl } from "./user-profile.idl"
+import { AuthClient } from "@dfinity/auth-client"
+import { idlFactory } from "@/lib/ic/learning-analytics.idl"
 
-export const USER_PROFILE_CANISTER_ID = "lc6ij-px777-77777-aaadq-cai" // Local user_profile canister
-export const LEARNING_ANALYTICS_CANISTER_ID = "lz3um-vp777-77777-aaaba-cai" // Local learning_analytics canister
-export const NOTIFICATIONS_CANISTER_ID = "l62sy-yx777-77777-aaabq-cai" // Local notifications canister
-export const RECOMMENDATIONS_CANISTER_ID = "ll5dv-z7777-77777-aaaca-cai" // Local recommendations canister
-export const SESSIONS_CANISTER_ID = "lm4fb-uh777-77777-aaacq-cai" // Local sessions canister
-export const SOCIAL_CANISTER_ID = "lf7o5-cp777-77777-aaada-cai" // Local social canister
-export const ASSET_CANISTER_ID = "lqy7q-dh777-77777-aaaaq-cai" // Local UI/asset canister
+// Configuration
+export const HOST = "http://127.0.0.1:4943" // Local replica
+export const LEARNING_ANALYTICS_CANISTER_ID = "bkyz2-fmaaa-aaaaa-qaaaq-cai"
+export const LOCAL_CANDID_UI = `http://127.0.0.1:4943/?canisterId=by6od-j4aaa-aaaaa-qaadq-cai&id=${LEARNING_ANALYTICS_CANISTER_ID}`
 
-// Simple fetch implementation
+// Shared agent instance
+let sharedAgent: HttpAgent | null = null
+let currentIdentity: Identity | null = null
+let authClientInstance: AuthClient | null = null
+
+// Timeout for API calls (in milliseconds)
+const API_TIMEOUT = 10000
+
+// Auth configuration
+export const AUTH_CONFIG = {
+  // 24 hours in nanoseconds
+  maxTimeToLive: BigInt(24 * 60 * 60 * 1000 * 1000 * 1000),
+  // 5 minutes in nanoseconds
+  idleOptions: {
+    idleTimeout: 5 * 60 * 1000, // 5 minutes in milliseconds
+    disableDefaultIdleCallback: true,
+  },
+}
+
+// Custom fetch with CBOR and CORS support
 const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const url = new URL(input.toString())
   
-  const requestInit: RequestInit = {
+  // Ensure we're using the correct API version
+  if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/v2/')) {
+    url.pathname = url.pathname.replace('/api/', '/api/v2/')
+  }
+  
+  // Skip CORS for IC API endpoints as they handle it differently
+  const isICApiCall = url.pathname.startsWith('/api/v2/status') || 
+                     url.pathname.startsWith('/api/v2/canister/');
+  
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', 'application/cbor')
+  headers.set('Accept', 'application/cbor')
+  
+  // For local development, add CORS headers
+  const isLocal = HOST.includes('localhost') || HOST.includes('127.0.0.1')
+  if (isLocal && !isICApiCall) {
+    // Get the origin from the request headers or use a default
+    const requestOrigin = init?.headers instanceof Headers 
+      ? init.headers.get('origin') 
+      : (init?.headers as any)?.origin || 'http://localhost:3000'
+    
+    // Set specific origin instead of wildcard when credentials are included
+    headers.set('Access-Control-Allow-Origin', requestOrigin)
+    headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+    headers.set('Access-Control-Allow-Credentials', 'true')
+    headers.set('Vary', 'Origin')
+  }
+  
+  // Handle preflight requests
+  if (init?.method === 'OPTIONS' && !isICApiCall) {
+    return new Response(null, {
+      status: 204,
+      headers: Object.fromEntries(headers.entries())
+    })
+  }
+  
+  const fetchOptions: RequestInit = {
     ...init,
-    headers: {
-      ...init?.headers,
-      'Content-Type': 'application/cbor'
-    },
-    cache: 'no-store'
-  };
-
-  try {
-    const response = await fetch(url, requestInit);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Request failed:', {
-        url,
-        status: response.status,
-        statusText: response.statusText,
-        error: errorText
-      });
-      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-    }
-    
-    return response;
-  } catch (error) {
-    console.error('Fetch error:', {
-      url,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    throw error;
+    headers,
+    mode: isICApiCall ? 'no-cors' : 'cors',
+    credentials: isLocal ? 'include' : 'same-origin',
+    cache: 'no-store' as const,
+    redirect: 'follow',
+    referrerPolicy: 'no-referrer'
   }
-};
-
-export function detectIcHost(): string {
-  // Always use port 4943 to match the IC replica's expected port
-  const host = "http://127.0.0.1:4943"
   
-  if (typeof window !== "undefined") {
-    console.log("Using IC replica at:", host, "| Hostname:", window.location.hostname)
-  } else {
-    console.log("Using IC replica at:", host, "| Server-side")
+  // For local development, handle preflight requests
+  if (HOST.includes('localhost') || HOST.includes('127.0.0.1')) {
+    try {
+      const response = await fetch(url.toString(), {
+        ...fetchOptions,
+        method: 'OPTIONS',
+        headers: {
+          ...Object.fromEntries(headers.entries()),
+          'Access-Control-Request-Method': init?.method || 'GET',
+          'Access-Control-Request-Headers': 'content-type',
+        },
+        body: undefined
+      })
+      
+      if (!response.ok) {
+        console.warn('Preflight request failed:', response.status, response.statusText)
+      }
+    } catch (error) {
+      console.warn('Error during preflight request:', error)
+    }
   }
-
-  return host
+  
+  // Make the actual request
+  const response = await fetch(url.toString(), fetchOptions)
+  
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'No error details')
+    console.error('API Error:', {
+      status: response.status,
+      statusText: response.statusText,
+      url: url.toString(),
+      error: errorText
+    })
+    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`)
+  }
+  
+  return response
 }
 
-export async function getIdentity(): Promise<Identity | null> {
-  const client = await AuthClient.create({
-    idleOptions: {
-      idleTimeout: 1000 * 60 * 30, // 30 minutes
-      disableDefaultIdleCallback: true,
-    },
-  })
-  const ok = await client.isAuthenticated()
-  return ok ? client.getIdentity() : null
+// Initialize AuthClient
+export async function initAuthClient(): Promise<AuthClient> {
+  if (!authClientInstance) {
+    const options = {
+      idleOptions: AUTH_CONFIG.idleOptions,
+      // Enable dev mode for local development
+      ...(HOST.includes('localhost') || HOST.includes('127.0.0.1') ? {
+        // This enables the local development environment
+        // and skips the authentication for testing
+        // In production, remove this or set to false
+        dev: true
+      } : {})
+    }
+    
+    authClientInstance = await AuthClient.create(options)
+  }
+  return authClientInstance
 }
 
+// Get or create an agent
 export async function getAgent(identity?: Identity): Promise<HttpAgent> {
-  try {
-    const host = detectIcHost()
-    const isLocal = host.includes("127.0.0.1") || host.includes("localhost")
-    
-    console.log("Creating IC agent with host:", host, "| Identity:", !!identity, "| Local:", isLocal)
-
-    // Get or create identity if not provided
-    const effectiveIdentity = identity || (await getIdentity())
-    
-    if (!effectiveIdentity) {
-      console.warn('No identity provided and no authenticated user found')
-    }
-
-    // Create agent with simplified configuration
-    const agent = new HttpAgent({ 
-      host,
-      identity: effectiveIdentity || undefined,
-      fetch: customFetch
-    });
-    
-    // Configure agent options
-    // @ts-expect-error - The _options property exists but isn't in the type definitions
-    if (agent._options) {
-      // @ts-expect-error - The verifyQuerySignatures option exists but isn't in the type definitions
-      agent._options.verifyQuerySignatures = false;
-    }
-
-    // Only fetch the root key in development
-    if (isLocal) {
-      try {
-        await agent.fetchRootKey()
-        console.log('Fetched root key for local development')
-      } catch (error) {
-        console.warn('Could not fetch root key for local development', error)
-        // Don't throw here, as we might still be able to proceed
-      }
-    } else {
-      // In production, we need to fetch the root key
-      console.log("Fetching root key for production environment")
-      try {
-        await agent.fetchRootKey()
-        console.log("Root key fetched successfully")
-      } catch (error) {
-        console.error("Failed to fetch root key:", error)
-        throw error
-      }
-    }
-    
-    // Using our custom fetch implementation via the agent options
-    
-    return agent;
-  } catch (error) {
-    console.error('Failed to initialize agent:', error);
-    throw new Error(`Failed to initialize agent: ${error instanceof Error ? error.message : String(error)}`);
+  // If we have a shared agent and either:
+  // 1. No specific identity was requested, or
+  // 2. The requested identity matches our current identity
+  if (sharedAgent && (!identity || (currentIdentity && identity.getPrincipal().toText() === currentIdentity.getPrincipal().toText()))) {
+    return sharedAgent
   }
+
+  // Create a new agent with the provided or default identity
+  const agent = new HttpAgent({
+    identity: identity || undefined,
+    host: HOST,
+    fetch: customFetch,
+    // Disable verification for local development
+    verifyQuerySignatures: !(HOST.includes('localhost') || HOST.includes('127.0.0.1'))
+  })
+
+  // For local development, fetch the root key
+  if (HOST.includes('localhost') || HOST.includes('127.0.0.1')) {
+    try {
+      console.log('Fetching root key for local development...')
+      await agent.fetchRootKey()
+      console.log('Successfully fetched root key')
+    } catch (error) {
+      console.warn('Failed to fetch root key:', error)
+      throw new Error('Failed to initialize agent: Could not fetch root key. Make sure the IC is running locally.')
+    }
+  }
+
+  // Cache the agent and current identity
+  sharedAgent = agent
+  currentIdentity = identity || null
+  
+  return agent
 }
 
-export async function createActor<T>(
-  canisterId: string, 
-  idlFactory: IDL.InterfaceFactory, 
+// Clear the cached agent and identity
+export function clearAgentCache() {
+  console.log('Clearing agent cache')
+  sharedAgent = null
+  currentIdentity = null
+  authClientInstance = null
+}
+
+// Create an actor with the given identity
+export async function createActor<T>({
+  canisterId,
+  idlFactory,
+  identity,
+}: {
+  canisterId: string
+  idlFactory: IDL.InterfaceFactory
   identity?: Identity
-): Promise<ActorSubclass<T>> {
+}): Promise<ActorSubclass<T>> {
   try {
     console.log(`Creating actor for canister: ${canisterId}`)
     const agent = await getAgent(identity)
@@ -167,47 +223,117 @@ export async function createActor<T>(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     console.error("Failed to create actor for canister:", canisterId, "Error:", errorMessage)
-    
-    // Log additional debug information
-    if (error instanceof Error && error.stack) {
-      console.error("Error stack:", error.stack)
-    }
-    
-    // Check for specific error conditions
-    if (errorMessage.includes("forbidden") || errorMessage.includes("403")) {
-      console.error("Authentication error: Make sure you're properly authenticated and the canister ID is correct")
-      console.error("Canister ID being used:", canisterId)
-      
-      if (identity) {
-        const principal = identity.getPrincipal()
-        console.error("Authenticated principal:", principal.toText())
-      } else {
-        console.error("No identity provided - using anonymous principal")
-      }
-    }
-    
-    // Re-throw with a more descriptive error
     throw new Error(`Failed to create actor for canister ${canisterId}: ${errorMessage}`)
   }
 }
 
-// Convenience creator for the User Profile canister
-export async function userProfileActor<T = any>(identity?: Identity): Promise<ActorSubclass<T>> {
-  try {
-    console.log("Creating user profile actor with canister ID:", USER_PROFILE_CANISTER_ID)
-    
-    // Verify the canister ID is set
-    if (!USER_PROFILE_CANISTER_ID) {
-      throw new Error("USER_PROFILE_CANISTER_ID is not set in environment variables")
-    }
-    
-    // Import the IDL factory for the user profile canister
-    const { idlFactory } = await import("./user-profile.idl")
-    
-    // Create and return the actor
-    return createActor<T>(USER_PROFILE_CANISTER_ID, idlFactory, identity)
-  } catch (error) {
-    console.error("Failed to create user profile actor:", error)
-    throw error
+// Create an authenticated actor for the learning analytics canister
+export async function createLearningAnalyticsActor(identity?: Identity) {
+  return createActor({
+    canisterId: LEARNING_ANALYTICS_CANISTER_ID,
+    idlFactory,
+    identity,
+  })
+}
+
+// Helper to handle API calls with timeout
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeout = API_TIMEOUT
+): Promise<T> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Request timed out after ${timeout}ms`))
+    }, timeout)
+  })
+
+  return Promise.race([promise, timeoutPromise])
+}
+
+// Check if the user is authenticated
+export async function isAuthenticated(): Promise<boolean> {
+  const authClient = await initAuthClient()
+  return await authClient.isAuthenticated()
+}
+
+// Get the current identity
+export async function getIdentity(): Promise<Identity | null> {
+  if (typeof window === 'undefined') {
+    return null // Server-side rendering
   }
+
+  try {
+    const authClient = await initAuthClient()
+    const isAuthenticated = await authClient.isAuthenticated()
+    return isAuthenticated ? authClient.getIdentity() : null
+  } catch (error) {
+    console.error('Error getting identity:', error)
+    return null
+  }
+}
+
+// Login function
+export async function login(): Promise<Identity | null> {
+  const authClient = await initAuthClient()
+
+  // Clear any existing agent cache before login
+  clearAgentCache()
+
+  return new Promise((resolve, reject) => {
+    const identityProvider = HOST.includes("localhost") || HOST.includes("127.0.0.1")
+      ? `http://127.0.0.1:4943/authenticate?applicationName=E-CRE`
+      : "https://identity.ic0.app"
+
+    authClient.login({
+      identityProvider,
+      maxTimeToLive: AUTH_CONFIG.maxTimeToLive,
+      onSuccess: async () => {
+        try {
+          const identity = authClient.getIdentity()
+          // Initialize a new agent with the authenticated identity
+          await getAgent(identity)
+          console.log('Login successful, principal:', identity.getPrincipal().toText())
+          resolve(identity)
+        } catch (error) {
+          console.error('Error after successful authentication:', error)
+          reject(error)
+        }
+      },
+      onError: (error) => {
+        console.error('Login error:', error)
+        // Clear any partial state on error
+        clearAgentCache()
+        reject(error || new Error('Login failed'))
+      },
+    })
+  })
+}
+
+// Logout function
+export async function logout() {
+  try {
+    const authClient = await initAuthClient()
+    await authClient.logout()
+  } catch (error) {
+    console.error('Error during logout:', error)
+  } finally {
+    // Always clear the agent cache, even if logout fails
+    clearAgentCache()
+    console.log('Logged out successfully')
+  }
+}
+
+// Default export for backward compatibility
+export default {
+  getAgent,
+  createActor,
+  createLearningAnalyticsActor,
+  isAuthenticated,
+  getIdentity,
+  login,
+  logout,
+  clearAgentCache,
+  HOST,
+  LEARNING_ANALYTICS_CANISTER_ID,
+  LOCAL_CANDID_UI,
 }

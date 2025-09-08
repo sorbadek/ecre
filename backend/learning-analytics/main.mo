@@ -9,6 +9,7 @@ import Int "mo:base/Int";
 import Buffer "mo:base/Buffer";
 import Iter "mo:base/Iter";
 import Debug "mo:base/Debug";
+import Float "mo:base/Float";
 
 actor LearningAnalytics {
     // Types
@@ -19,10 +20,10 @@ actor LearningAnalytics {
         contentType: Text; // "course", "session", "tutorial", "project"
         startTime: Int;
         endTime: ?Int;
-        duration: Nat; // in minutes
+        duration: Int; // in minutes (Int)
         completed: Bool;
         progress: Nat; // percentage 0-100
-        xpEarned: Nat;
+        xpEarned: Int;
         date: Text; // YYYY-MM-DD format
     };
 
@@ -32,8 +33,8 @@ actor LearningAnalytics {
         courseName: Text;
         totalLessons: Nat;
         completedLessons: Nat;
-        totalDuration: Nat; // in minutes
-        timeSpent: Nat; // in minutes
+        totalDuration: Nat; // in minutes (Nat)
+        timeSpent: Nat; // in minutes (Nat)
         lastAccessed: Int;
         completionRate: Nat; // percentage 0-100
         xpEarned: Nat;
@@ -43,9 +44,9 @@ actor LearningAnalytics {
     public type DailyActivity = {
         userId: Principal;
         date: Text; // YYYY-MM-DD format
-        sessionsCount: Nat;
-        totalTimeSpent: Nat; // in minutes
-        xpEarned: Nat;
+        sessionsCount: Int;
+        totalTimeSpent: Int; // in minutes (Int)
+        xpEarned: Int;
         coursesAccessed: [Text];
     };
 
@@ -67,15 +68,15 @@ actor LearningAnalytics {
         overallCompletionRate: Nat;
     };
 
-    // State
+    // Stable storage arrays for upgrade
     private stable var sessionEntries: [(Text, LearningSession)] = [];
-    private var sessions = HashMap.fromIter<Text, LearningSession>(sessionEntries.vals(), 100, Text.equal, Text.hash);
+    private var sessions = HashMap.fromIter<Text, LearningSession>(Iter.fromArray(sessionEntries), 100, Text.equal, Text.hash);
 
     private stable var progressEntries: [(Text, CourseProgress)] = [];
-    private var courseProgress = HashMap.fromIter<Text, CourseProgress>(progressEntries.vals(), 50, Text.equal, Text.hash);
+    private var courseProgress = HashMap.fromIter<Text, CourseProgress>(Iter.fromArray(progressEntries), 50, Text.equal, Text.hash);
 
     private stable var activityEntries: [(Text, DailyActivity)] = [];
-    private var dailyActivities = HashMap.fromIter<Text, DailyActivity>(activityEntries.vals(), 200, Text.equal, Text.hash);
+    private var dailyActivities = HashMap.fromIter<Text, DailyActivity>(Iter.fromArray(activityEntries), 200, Text.equal, Text.hash);
 
     private stable var nextSessionId: Nat = 0;
 
@@ -111,7 +112,7 @@ actor LearningAnalytics {
         sessionId: Text,
         completed: Bool,
         progress: Nat,
-        xpEarned: Nat
+        xpEarned: Int
     ) : async Result.Result<LearningSession, Text> {
         let caller = msg.caller;
         
@@ -124,7 +125,8 @@ actor LearningAnalytics {
 
                 let endTime = Time.now();
                 let durationNanos = Int.abs(endTime - session.startTime);
-                let durationMinutes = durationNanos / 60_000_000_000; // Convert to minutes
+                // Convert to minutes (Int)
+                let durationMinutes = durationNanos / 60_000_000_000;
 
                 let updatedSession: LearningSession = {
                     session with
@@ -137,8 +139,8 @@ actor LearningAnalytics {
 
                 sessions.put(sessionId, updatedSession);
                 
-                // Update daily activity
-                ignore updateDailyActivity(caller, durationMinutes, xpEarned, session.contentId, session.date);
+                // Update daily activity (uses Ints)
+                updateDailyActivity(caller, durationMinutes, xpEarned, session.contentId, session.date);
                 
                 #ok(updatedSession)
             };
@@ -146,6 +148,7 @@ actor LearningAnalytics {
     };
 
     // Course Progress Management
+    // note: timeSpent and xpEarned are Nat now to avoid Int<->Nat conversions
     public shared(msg) func updateCourseProgress(
         courseId: Text,
         courseName: Text,
@@ -187,29 +190,31 @@ actor LearningAnalytics {
         
         // Get last 7 days
         let weekDates = getLastSevenDays(now);
-        let dailyHours = Buffer.Buffer<Float>(7);
-        var totalHours: Float = 0;
+        let dailyHoursBuf = Buffer.Buffer<Float>(7);
+        var totalHours: Float = 0.0;
 
         for (date in weekDates.vals()) {
             let activityId = Principal.toText(caller) # "_" # date;
             switch (dailyActivities.get(activityId)) {
-                case null { dailyHours.add(0.0) };
+                case null { dailyHoursBuf.add(0.0) };
                 case (?activity) {
+                    // convert minutes (Int) to hours (Float)
                     let hours = Float.fromInt(activity.totalTimeSpent) / 60.0;
-                    dailyHours.add(hours);
+                    dailyHoursBuf.add(hours);
                     totalHours += hours;
                 };
             };
         };
 
+        // weekDates currently returns 7 entries in this demo implementation
         let averageHours = if (weekDates.size() > 0) {
-            totalHours / Float.fromInt(weekDates.size())
+            totalHours / 7.0
         } else { 0.0 };
 
         {
             userId = caller;
             weekDates = weekDates;
-            dailyHours = Buffer.toArray(dailyHours);
+            dailyHours = Buffer.toArray(dailyHoursBuf);
             totalHours = totalHours;
             averageHours = averageHours;
         }
@@ -292,15 +297,16 @@ actor LearningAnalytics {
         for (i in weekDates.keys()) {
             let date = weekDates[i];
             let hours = sampleHours[i];
-            let minutes = Int.abs(Float.toInt(hours * 60.0));
-            
+            let minutes = Int.abs(Float.toInt(hours * 60.0)); // Int
+            let xp = minutes / 10; // Int division
+
             let activityId = Principal.toText(caller) # "_" # date;
             let activity: DailyActivity = {
                 userId = caller;
                 date = date;
                 sessionsCount = 2;
                 totalTimeSpent = minutes;
-                xpEarned = minutes / 10; // 1 XP per 10 minutes
+                xpEarned = xp; // 1 XP per 10 minutes
                 coursesAccessed = ["react-course", "javascript-course"];
             };
             dailyActivities.put(activityId, activity);
@@ -327,11 +333,11 @@ actor LearningAnalytics {
                 courseName = courseName;
                 totalLessons = totalLessons;
                 completedLessons = completedLessons;
-                totalDuration = totalLessons * 30; // 30 minutes per lesson
+                totalDuration = totalLessons * 30; // Nat math, 30 minutes per lesson
                 timeSpent = completedLessons * 30;
                 lastAccessed = now;
                 completionRate = completionRate;
-                xpEarned = completedLessons * 50; // 50 XP per lesson
+                xpEarned = completedLessons * 50; // 50 XP per lesson (Nat)
                 status = status;
             };
             courseProgress.put(progressId, progress);
@@ -343,8 +349,8 @@ actor LearningAnalytics {
     // Private helper functions
     private func updateDailyActivity(
         userId: Principal,
-        timeSpent: Nat,
-        xpEarned: Nat,
+        timeSpent: Int,
+        xpEarned: Int,
         contentId: Text,
         date: Text
     ) : () {
@@ -378,7 +384,7 @@ actor LearningAnalytics {
     private func formatDate(timestamp: Int) : Text {
         // Simple date formatting - in production, use proper date library
         let days = Int.abs(timestamp) / (24 * 60 * 60 * 1_000_000_000);
-        let epochDays = 19358; // Days since epoch to 2023-01-01
+        let epochDays = 19358; // Days since epoch to 2023-01-01 (demo)
         let totalDays = epochDays + days;
         
         // Simple calculation for demo purposes
@@ -386,34 +392,34 @@ actor LearningAnalytics {
         let month = ((totalDays % 365) / 30) + 1;
         let day = (totalDays % 30) + 1;
         
-        let monthStr = if (month < 10) "0" # Nat.toText(month) else Nat.toText(month);
-        let dayStr = if (day < 10) "0" # Nat.toText(day) else Nat.toText(day);
+        let monthStr = if (month < 10) "0" # Int.toText(month) else Int.toText(month);
+        let dayStr = if (day < 10) "0" # Int.toText(day) else Int.toText(day);
         
-        Nat.toText(year) # "-" # monthStr # "-" # dayStr
+        Int.toText(year) # "-" # monthStr # "-" # dayStr
     };
 
     private func getLastSevenDays(timestamp: Int) : [Text] {
-        let today = formatDate(timestamp);
-        let buffer = Buffer.Buffer<Text>(7);
-        
-        // For demo purposes, generate last 7 days
+        // For demo purposes this returns a static slice of 7 dates
         let dayNames = ["2024-01-13", "2024-01-14", "2024-01-15", "2024-01-16", "2024-01-17", "2024-01-18", "2024-01-19"];
-        
-        for (day in dayNames.vals()) {
-            buffer.add(day);
-        };
-        
-        Buffer.toArray(buffer)
+        let buf = Buffer.Buffer<Text>(7);
+        for (d in dayNames.vals()) { buf.add(d) };
+        Buffer.toArray(buf)
     };
 
     // System upgrade hooks
     system func preupgrade() {
+        // persist maps into stable arrays
         sessionEntries := sessions.entries() |> Iter.toArray(_);
         progressEntries := courseProgress.entries() |> Iter.toArray(_);
         activityEntries := dailyActivities.entries() |> Iter.toArray(_);
     };
 
     system func postupgrade() {
+        // rebuild maps from stable arrays then clear the arrays
+        sessions := HashMap.fromIter<Text, LearningSession>(Iter.fromArray(sessionEntries), 100, Text.equal, Text.hash);
+        courseProgress := HashMap.fromIter<Text, CourseProgress>(Iter.fromArray(progressEntries), 50, Text.equal, Text.hash);
+        dailyActivities := HashMap.fromIter<Text, DailyActivity>(Iter.fromArray(activityEntries), 200, Text.equal, Text.hash);
+
         sessionEntries := [];
         progressEntries := [];
         activityEntries := [];

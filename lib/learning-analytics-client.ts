@@ -1,17 +1,12 @@
-import { Actor, HttpAgent, Identity } from "@dfinity/agent"
+import { Actor, type Identity } from "@dfinity/agent"
 import { idlFactory } from "./ic/learning-analytics.idl"
-
-const LEARNING_ANALYTICS_CANISTER_ID = "lz3um-vp777-77777-aaaba-cai"
+import { getAgent, LEARNING_ANALYTICS_CANISTER_ID } from "./ic/agent"
 
 // Host configuration
 const isLocal = typeof window !== "undefined" && 
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
-const HOST = isLocal 
-  ? "http://127.0.0.1:4943"  // Using port 4943 for local development
-  : "https://ic0.app";
-
-console.log('Learning Analytics client configured with host:', HOST);
+console.log('Learning Analytics client initialized in', isLocal ? 'local' : 'production', 'mode');
 
 export interface LearningSession {
   id: string
@@ -20,10 +15,10 @@ export interface LearningSession {
   contentType: string
   startTime: bigint
   endTime?: bigint
-  duration: bigint  // Changed from number to bigint to match Motoko Int
+  duration: number  // Changed to number since Motoko Int maps to number in JS
   completed: boolean
   progress: number
-  xpEarned: bigint  // Changed from number to bigint to match Motoko Int
+  xpEarned: number  // Changed to number since Motoko Int maps to number in JS
   date: string
 }
 
@@ -33,11 +28,11 @@ export interface CourseProgress {
   courseName: string
   totalLessons: number
   completedLessons: number
-  totalDuration: bigint  // Changed from number to bigint to match Motoko Int
-  timeSpent: bigint     // Changed from number to bigint to match Motoko Int
+  totalDuration: number  // Changed to number
+  timeSpent: number     // Changed to number
   lastAccessed: bigint
   completionRate: number
-  xpEarned: bigint      // Changed from number to bigint to match Motoko Int
+  xpEarned: number      // Changed to number
   status: string
 }
 
@@ -75,42 +70,19 @@ export class LearningAnalyticsClient {
   private async getActor() {
     if (this.actor) return this.actor;
 
-    if (!this.identity) {
-      // Optionally, handle the case where there's no identity.
-      // For now, we'll let it proceed, and HttpAgent will use an anonymous identity.
-      console.warn("LearningAnalyticsClient is using an anonymous identity.");
-    }
-
-    console.log('Initializing learning analytics client with host:', HOST);
-    
     try {
-      // Configure agent with explicit API version for local development
-      const agent = new HttpAgent({
-        identity: this.identity || undefined,
-        host: HOST,
-        // Force API v2 for local development
-        ...(isLocal && { _agent: { _host: { origin: HOST, protocol: 'http:' } } })
-      });
-
-      if (isLocal) {
-        try {
-          await agent.fetchRootKey();
-          console.log('Successfully fetched root key for local development');
-        } catch (error) {
-          console.warn('Failed to fetch root key:', error);
-          // Even if root key fetch fails, we can still proceed in most cases
-        }
-      }
-
+      const agent = await getAgent(this.identity || undefined);
+      
       this.actor = Actor.createActor(idlFactory, {
         agent,
         canisterId: LEARNING_ANALYTICS_CANISTER_ID,
       });
-
+      
+      console.log('Learning Analytics Actor created with canister ID:', LEARNING_ANALYTICS_CANISTER_ID);
       return this.actor;
     } catch (error) {
-      console.error('Failed to initialize actor:', error);
-      throw new Error('Failed to initialize learning analytics client');
+      console.error('Failed to initialize learning analytics actor:', error);
+      throw new Error('Failed to initialize learning analytics client: ' + (error as Error).message);
     }
   }
 
@@ -137,9 +109,18 @@ export class LearningAnalyticsClient {
   ): Promise<LearningSession> {
     try {
       const actor = await this.getActor()
-      const result = await actor.endLearningSession(sessionId, completed, progress, xpEarned)
+      const result = await actor.endLearningSession(
+        sessionId, 
+        completed, 
+        progress, 
+        xpEarned
+      )
       if ("ok" in result) {
-        return result.ok
+        return {
+          ...result.ok,
+          userId: result.ok.userId.toString(),
+          endTime: result.ok.endTime?.[0] // Handle optional endTime
+        }
       } else {
         throw new Error(result.err)
       }
@@ -156,7 +137,7 @@ export class LearningAnalyticsClient {
     completedLessons: number,
     timeSpent: number,
     xpEarned: number,
-    status: string,
+    status: 'not_started' | 'in_progress' | 'completed' | 'paused',
   ): Promise<CourseProgress> {
     try {
       const actor = await this.getActor()
@@ -170,7 +151,10 @@ export class LearningAnalyticsClient {
         status,
       )
       if ("ok" in result) {
-        return result.ok
+        return {
+          ...result.ok,
+          userId: result.ok.userId.toString()
+        }
       } else {
         throw new Error(result.err)
       }
@@ -184,7 +168,10 @@ export class LearningAnalyticsClient {
     try {
       const actor = await this.getActor()
       const result = await actor.getWeeklyStats()
-      return result
+      return {
+        ...result,
+        userId: result.userId.toString()
+      }
     } catch (error) {
       console.error("Error getting weekly stats:", error)
       throw error
@@ -195,7 +182,10 @@ export class LearningAnalyticsClient {
     try {
       const actor = await this.getActor()
       const result = await actor.getCourseStats()
-      return result
+      return {
+        ...result,
+        userId: result.userId.toString()
+      }
     } catch (error) {
       console.error("Error getting course stats:", error)
       throw error
@@ -206,7 +196,11 @@ export class LearningAnalyticsClient {
     try {
       const actor = await this.getActor()
       const result = await actor.getMySessions()
-      return result
+      return result.map((session: any) => ({
+        ...session,
+        userId: session.userId.toString(),
+        endTime: session.endTime?.[0] // Unwrap optional endTime
+      }))
     } catch (error) {
       console.error("Error getting sessions:", error)
       return []
@@ -217,7 +211,10 @@ export class LearningAnalyticsClient {
     try {
       const actor = await this.getActor()
       const result = await actor.getMyCourseProgress()
-      return result
+      return result.map((progress: any) => ({
+        ...progress,
+        userId: progress.userId.toString()
+      }))
     } catch (error) {
       console.error("Error getting course progress:", error)
       return []
@@ -240,7 +237,5 @@ export class LearningAnalyticsClient {
   }
 }
 
-
 // Create a singleton instance of the client
 export const learningAnalyticsClient = new LearningAnalyticsClient();
-

@@ -2,12 +2,13 @@
 
 import type React from "react"
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
-import { AuthClient, Identity } from "@dfinity/auth-client"
+import { AuthClient } from "@dfinity/auth-client"
+import { Identity } from "@dfinity/agent"
 import { SessionClient } from "./session-client"
 
 declare module "./session-client" {
   interface SessionClient {
-    setIdentity: (identity: Identity) => void;
+    setIdentity: (identity: Identity | null) => void;
   }
 }
 

@@ -56,6 +56,7 @@ import { NotificationsPanel } from "@/components/notifications/notifications-pan
 import { SocialSidebar } from "@/components/social/social-sidebar"
 import { RecommendationsPanel } from "@/components/recommendations/recommendations-panel"
 import { type CourseProgress } from "@/lib/learning-analytics-client"
+import {useLearningAnalytics} from "@/hooks/useLearningAnalytics"
 
 interface ChartCourseProgress {
   course: string
@@ -91,142 +92,110 @@ const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
 }
 
 export default function DashboardPage() {
-  const { learningAnalyticsClient, isAuthenticated, loading: authLoading, clientsInitialized } = useApiClients()
-  const [showXPModal, setShowXPModal] = useState(false)
-  const [weeklyData, setWeeklyData] = useState<any[]>([])
-  const [chartCourseProgress, setChartCourseProgress] = useState<ChartCourseProgress[]>([])
-  const [detailedCourseProgress, setDetailedCourseProgress] = useState<CourseProgress[]>([])
-  const [activities, setActivities] = useState<Activity[]>([])
-  const [partners, setPartners] = useState<PartnerProfile[]>([])
-  const [loading, setLoading] = useState(true)
-  const [totalCourses, setTotalCourses] = useState(0)
+  const { isAuthenticated, loading: authLoading } = useApiClients();
+  const { 
+    weeklyStats, 
+    courseStats, 
+    courseProgress: detailedCourseProgress, 
+    loading, 
+    error,
+    refresh: refreshAnalytics 
+  } = useLearningAnalytics();
+  
+  const [showXPModal, setShowXPModal] = useState(false);
+  const [weeklyData, setWeeklyData] = useState<any[]>([]);
+  const [chartCourseProgress, setChartCourseProgress] = useState<ChartCourseProgress[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [partners, setPartners] = useState<PartnerProfile[]>([]);
+  const [totalCourses, setTotalCourses] = useState(0);
 
-  // Show loading state while auth is initializing
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    )
-  }
-
-  const loadDashboardData = useCallback(async () => {
-    if (!isAuthenticated) {
-      console.warn("User not authenticated, skipping dashboard data load")
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    try {
-      // Load learning analytics if client is available
-      if (learningAnalyticsClient) {
-        // Get weekly stats
-        try {
-          const analytics = await learningAnalyticsClient.getWeeklyStats()
-          if (analytics && Array.isArray(analytics.dailyHours)) {
-            const chartData = analytics.dailyHours.map((hours: number | bigint, index: number) => {
-              const hoursNum = typeof hours === 'bigint' ? Number(hours) : hours
-              return {
-                day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index % 7],
-                hours: hoursNum,
-                xp: Math.round(hoursNum * 50)
-              }
-            })
-            setWeeklyData(chartData)
-          }
-        } catch (error) {
-          console.warn("Error loading weekly stats:", error)
-          setWeeklyData([])
-        }
-
-        // Get course stats
-        try {
-          const stats = await learningAnalyticsClient.getCourseStats()
-          if (stats) {
-            const completed = Number(stats.completed) || 0
-            const inProgress = Number(stats.inProgress) || 0
-            const paused = Number(stats.paused) || 0
-            const notStarted = Number(stats.notStarted) || 0
-            const total = completed + inProgress + paused + notStarted
-            
-            const progressData: ChartCourseProgress[] = [
-              {
-                course: "Completed",
-                value: completed,
-                color: "#0ea5e9",
-                percentage: Math.round((completed / total) * 100) || 0,
-              },
-              {
-                course: "In Progress",
-                value: inProgress,
-                color: "#38bdf8",
-                percentage: Math.round((inProgress / total) * 100) || 0,
-              },
-              {
-                course: "Paused",
-                value: paused,
-                color: "#7dd3fc",
-                percentage: Math.round((paused / total) * 100) || 0,
-              },
-              {
-                course: "Not Started",
-                value: notStarted,
-                color: "#bae6fd",
-                percentage: Math.round((notStarted / total) * 100) || 0,
-              },
-            ]
-            
-            setChartCourseProgress(progressData)
-            setTotalCourses(total)
-          }
-        } catch (error) {
-          console.warn("Error loading course stats:", error)
-          setChartCourseProgress([])
-        }
-
-        // Get detailed course progress
-        try {
-          const progress = await learningAnalyticsClient.getMyCourseProgress()
-          if (progress) {
-            setDetailedCourseProgress(Array.isArray(progress) ? progress : [])
-          }
-        } catch (error) {
-          console.warn("Error loading course progress:", error)
-          setDetailedCourseProgress([])
-        }
-      }
-
-      // Load notifications
-      try {
-        const notifications = await notificationsClient.getMyActivities(5)
-        setActivities(notifications || [])
-      } catch (error) {
-        console.warn("Error loading notifications:", error)
-        setActivities([])
-      }
-
-      // Load learning partners
-      try {
-        const partners = await socialClient.getMyPartners()
-        setPartners(partners || [])
-      } catch (error) {
-        console.warn("Error loading partners:", error)
-        setPartners([])
-      }
-    } catch (error) {
-      console.error("Error loading dashboard data:", error)
-      toast.error("Failed to load dashboard data")
-    } finally {
-      setLoading(false)
-    }
-  }, [isAuthenticated, learningAnalyticsClient])
-
+  // Process weekly stats when they change
   useEffect(() => {
-    if (clientsInitialized && isAuthenticated) {
-      loadDashboardData()
+    if (weeklyStats) {
+      const { weekDates, dailyHours } = weeklyStats;
+      
+      const chartData = weekDates.map((date: string, index: number) => {
+        const hours = dailyHours[index] || 0;
+        const hoursNum = typeof hours === 'bigint' ? Number(hours) : hours;
+        const day = new Date(date).toLocaleDateString('en-US', { weekday: 'short' });
+        
+        return {
+          day,
+          hours: hoursNum,
+          xp: Math.round(hoursNum * 50) // Assuming 50 XP per hour
+        };
+      });
+      
+      setWeeklyData(chartData);
+    } else {
+      setWeeklyData([]);
     }
-  }, [clientsInitialized, isAuthenticated, loadDashboardData])
+  }, [weeklyStats]);
+
+  // Process course stats when they change
+  useEffect(() => {
+    if (courseStats) {
+      const { completed, inProgress, paused, notStarted } = courseStats;
+      const total = Number(completed) + Number(inProgress) + Number(paused) + Number(notStarted);
+      
+      const progressData: ChartCourseProgress[] = [
+        {
+          course: "Completed",
+          value: Number(completed) || 0,
+          color: "#0ea5e9",
+          percentage: total > 0 ? Math.round((Number(completed) / total) * 100) : 0,
+        },
+        {
+          course: "In Progress",
+          value: Number(inProgress) || 0,
+          color: "#38bdf8",
+          percentage: total > 0 ? Math.round((Number(inProgress) / total) * 100) : 0,
+        },
+        {
+          course: "Paused",
+          value: Number(paused) || 0,
+          color: "#7dd3fc",
+          percentage: total > 0 ? Math.round((Number(paused) / total) * 100) : 0,
+        },
+        {
+          course: "Not Started",
+          value: Number(notStarted) || 0,
+          color: "#bae6fd",
+          percentage: total > 0 ? Math.round((Number(notStarted) / total) * 100) : 0,
+        },
+      ];
+      
+      setChartCourseProgress(progressData);
+      setTotalCourses(total);
+    } else {
+      setChartCourseProgress([]);
+      setTotalCourses(0);
+    }
+  }, [courseStats]);
+
+  // Load notifications and partners when component mounts
+  useEffect(() => {
+    const loadData = async () => {
+      if (!isAuthenticated) return;
+      
+      try {
+        // Load notifications
+        const notifications = await notificationsClient.getMyActivities(5);
+        setActivities(notifications || []);
+
+        // Load learning partners
+        const partners = await socialClient.getMyPartners();
+        setPartners(partners || []);
+      } catch (error) {
+        console.error("Error loading dashboard data:", error);
+        toast.error("Failed to load dashboard data");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [isAuthenticated]);
 
   const formatRelativeTime = (timestamp: bigint | number): string => {
     const date = new Date(Number(timestamp) * 1000)
@@ -293,7 +262,12 @@ export default function DashboardPage() {
                     <div>
                       <p className="text-sm font-medium text-sky-600">XP Balance</p>
                       <p className="text-3xl font-bold text-sky-800">
-                        {detailedCourseProgress.reduce((acc, p) => acc + Number(p.xpEarned || 0), 0).toLocaleString()}
+                        {detailedCourseProgress
+                          .reduce((acc, p) => {
+                            const xp = typeof p.xpEarned === 'bigint' ? Number(p.xpEarned) : (p.xpEarned || 0);
+                            return acc + xp;
+                          }, 0)
+                          .toLocaleString()}
                       </p>
                     </div>
                   </div>

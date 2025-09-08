@@ -4,32 +4,32 @@
     "user_profile": {
       "type": "motoko",
       "main": "user-profile/main.mo",
-      "local": "lc6ij-px777-77777-aaadq-cai"
+      "local": "b77ix-eeaaa-aaaaa-qaada-cai"
     },
     "learning_analytics": {
       "type": "motoko",
       "main": "learning-analytics/main.mo",
-      "local": "lz3um-vp777-77777-aaaba-cai"
+      "local": "bkyz2-fmaaa-aaaaa-qaaaq-cai"
     },
     "notifications": {
       "type": "motoko",
       "main": "notifications/main.mo",
-      "local": "l62sy-yx777-77777-aaabq-cai"
+      "local": "bd3sg-teaaa-aaaaa-qaaba-cai"
     },
     "social": {
       "type": "motoko",
       "main": "social/main.mo",
-      "local": "lf7o5-cp777-77777-aaada-cai"
+      "local": "bw4dl-smaaa-aaaaa-qaacq-cai"
     },
     "recommendations": {
       "type": "motoko",
       "main": "recommendations/main.mo",
-      "local": "ll5dv-z7777-77777-aaaca-cai"
+      "local": "be2us-64aaa-aaaaa-qaabq-cai"
     },
     "sessions": {
       "type": "motoko",
       "main": "sessions/main.mo",
-      "local": "lm4fb-uh777-77777-aaacq-cai"
+      "local": "br5f7-7uaaa-aaaaa-qaaca-cai"
     },
     "peerverse_frontend": {
       "type": "assets",

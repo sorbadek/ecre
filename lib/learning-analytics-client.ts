@@ -1,6 +1,6 @@
 import { Actor, type Identity } from "@dfinity/agent"
 import { idlFactory } from "./ic/learning-analytics.idl"
-import { getAgent, LEARNING_ANALYTICS_CANISTER_ID } from "./ic/agent"
+import { getAgent, LEARNING_ANALYTICS_CANISTER_ID, createActor } from "./ic/agent"
 
 // Host configuration
 const isLocal = typeof window !== "undefined" && 
@@ -68,22 +68,14 @@ export class LearningAnalyticsClient {
   }
 
   private async getActor() {
-    if (this.actor) return this.actor;
-
-    try {
-      const agent = await getAgent(this.identity || undefined);
-      
-      this.actor = Actor.createActor(idlFactory, {
-        agent,
+    if (!this.actor) {
+      this.actor = await createActor({
         canisterId: LEARNING_ANALYTICS_CANISTER_ID,
-      });
-      
-      console.log('Learning Analytics Actor created with canister ID:', LEARNING_ANALYTICS_CANISTER_ID);
-      return this.actor;
-    } catch (error) {
-      console.error('Failed to initialize learning analytics actor:', error);
-      throw new Error('Failed to initialize learning analytics client: ' + (error as Error).message);
+        idlFactory,
+        identity: this.identity || undefined
+      })
     }
+    return this.actor
   }
 
   async startLearningSession(contentId: string, contentType: string): Promise<string> {

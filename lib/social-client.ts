@@ -105,30 +105,86 @@ class SocialClient {
             input instanceof Request ? input.url : input.toString(),
             typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
           );
-          const isICApiCall = url.pathname.includes('/api/v2/');
           
-          // For local development, modify the request to bypass certificate verification
-          if (isLocal && isICApiCall) {
-            const modifiedUrl = new URL(url.toString());
-            modifiedUrl.searchParams.append('__disable-verification', 'true');
-            
-            const modifiedInit: RequestInit = {
-              ...init,
-              headers: {
-                ...init?.headers,
-                'X-IC-Disable-Certificate-Validation': 'true',
-                'X-IC-Allow-Insecure-Requests': 'true',
-              },
-              credentials: 'include' as const,
-              mode: 'cors',
-              cache: 'no-cache',
-            };
-            
-            console.log(`[SocialClient] Making request to: ${modifiedUrl.toString()}`);
-            return await customFetch(modifiedUrl, modifiedInit);
+          // Fix double API version in path if it exists
+          if (url.pathname.includes('/v2/v3/')) {
+            url.pathname = url.pathname.replace('/v2/v3/', '/v2/');
           }
           
-          return await customFetch(input, init);
+          const isICApiCall = url.pathname.includes('/api/v2/');
+          const isLocal = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+          const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+          
+          // Prepare request headers
+          const requestHeaders = new Headers(init?.headers);
+          
+          // Always set the Origin header for CORS
+          requestHeaders.set('Origin', origin);
+          
+          // Add required headers for IC API calls
+          if (isICApiCall) {
+            requestHeaders.set('Content-Type', 'application/cbor');
+            requestHeaders.set('Accept', 'application/cbor');
+            
+            // For local development, add headers to bypass certificate validation
+            if (isLocal) {
+              // Add cache-busting for status endpoint
+              if (url.pathname.endsWith('/status')) {
+                url.searchParams.set('_', Date.now().toString());
+              }
+              
+              // Add IC-specific headers
+              requestHeaders.set('X-IC-Disable-Certificate-Validation', 'true');
+              requestHeaders.set('X-IC-Allow-Insecure-Requests', 'true');
+              
+              // For preflight requests, ensure we have the necessary headers
+              if (init?.method === 'OPTIONS') {
+                requestHeaders.set('Access-Control-Request-Method', init.method || 'GET');
+                requestHeaders.set('Access-Control-Request-Headers', 'content-type,authorization');
+              }
+            }
+          }
+          
+          // Prepare fetch options
+          const fetchOptions: RequestInit = {
+            ...init,
+            headers: requestHeaders,
+            mode: 'cors',
+            cache: 'no-cache',
+            credentials: isICApiCall ? 'include' : 'same-origin'
+          };
+          
+          // For local development, ensure we're not sending credentials to non-local endpoints
+          if (isLocal && !isICApiCall) {
+            delete (fetchOptions as any).credentials;
+          }
+          
+          console.log(`[SocialClient] Making request to: ${url.toString()}`, {
+            method: fetchOptions.method,
+            headers: Object.fromEntries(requestHeaders.entries()),
+            credentials: fetchOptions.credentials
+          });
+          
+          // Make the request through our custom fetch
+          const response = await customFetch(url, fetchOptions);
+          
+          // For local development, ensure CORS headers are set in the response
+          if (isLocal && isICApiCall) {
+            const responseHeaders = new Headers(response.headers);
+            responseHeaders.set('Access-Control-Allow-Origin', origin);
+            responseHeaders.set('Access-Control-Allow-Credentials', 'true');
+            
+            // Create a new response with the modified headers
+            if (response.body) {
+              return new Response(response.body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: responseHeaders
+              });
+            }
+          }
+          
+          return response;
         } catch (error) {
           console.error('[SocialClient] Error in custom fetch:', error);
           throw error;

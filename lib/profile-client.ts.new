@@ -1,0 +1,275 @@
+import { Actor, type Identity, type ActorSubclass, type ActorMethod, HttpAgent } from "@dfinity/agent";
+import { AuthClient } from "@dfinity/auth-client";
+import { Principal } from "@dfinity/principal";
+
+// Import from the local agent file
+import { HOST, USER_PROFILE_CANISTER_ID } from "./ic/agent";
+
+// Import IDL factory
+import { idlFactory } from "./ic/user-profile.idl";
+
+// Define types based on the IDL
+interface UserSettings {
+  notifications: boolean;
+  privacy: string;
+  theme: string;
+  language: string;
+  emailNotifications: boolean;
+  profileVisibility: string;
+}
+
+export interface UserFile {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: bigint;
+  url: string;
+  category: string;
+  uploadedAt: bigint;
+  tags: string[];
+}
+
+export interface UserProfile {
+  id: Principal;
+  name: string;
+  email: string;
+  bio: string;
+  avatarUrl: string;
+  coverUrl: string;
+  xpBalance: bigint;
+  reputation: bigint;
+  interests: string[];
+  socialLinks: [string, string][];
+  settings: UserSettings;
+  files: UserFile[];
+  createdAt: bigint;
+  updatedAt: bigint;
+}
+
+// Extended interface for the frontend
+export interface UserProfileExtended extends Omit<UserProfile, 'xpBalance' | 'reputation' | 'createdAt' | 'updatedAt' | 'socialLinks'> {
+  xpBalance: number;
+  reputation: number;
+  createdAt: Date;
+  updatedAt: Date;
+  socialLinks: Record<string, string>;
+}
+
+// Service interface for the canister
+interface UserProfileService {
+  createProfile: ActorMethod<[string, string], { ok: UserProfile } | { err: string }>;
+  getMyProfile: ActorMethod<[], UserProfile | null>;
+  updateProfile: ActorMethod<[Partial<UserProfile>], { ok: UserProfile } | { err: string }>;
+  updateAvatar: ActorMethod<[string], { ok: UserProfile } | { err: string }>;
+  updateCover: ActorMethod<[string], { ok: UserProfile } | { err: string }>;
+  uploadFile: ActorMethod<[
+    string, // filename
+    string, // contentType
+    bigint, // size
+    string, // url
+    string, // description
+    string[] // tags
+  ], { ok: UserFile } | { err: string }>;
+  getMyFiles: ActorMethod<[], UserFile[]>;
+  addSocialLink: ActorMethod<[string, string], { ok: UserProfile } | { err: string }>;
+  removeSocialLink: ActorMethod<[string], { ok: UserProfile } | { err: string }>;
+  getXPBalance: ActorMethod<[], bigint>;
+  addXP: ActorMethod<[bigint, string, string, string], { ok: bigint } | { err: string }>;
+}
+
+// Mock file upload function - replace with actual implementation
+const uploadToAssetCanister = async (file: File, objectKey: string): Promise<string> => {
+  // Implement actual file upload logic here
+  return `https://example.com/${objectKey}`;
+};
+
+// Helper function to create an actor
+const getActor = async (): Promise<ActorSubclass<UserProfileService>> => {
+  const authClient = await AuthClient.create();
+  const identity = authClient.getIdentity();
+  
+  if (!identity) {
+    throw new Error("Not authenticated");
+  }
+  
+  const agent = new HttpAgent({
+    host: HOST,
+    identity,
+  });
+  
+  // Only fetch the root key when not in production
+  if (process.env.NODE_ENV !== "production") {
+    await agent.fetchRootKey();
+  }
+  
+  return Actor.createActor<UserProfileService>(idlFactory, {
+    agent,
+    canisterId: USER_PROFILE_CANISTER_ID,
+  });
+};
+
+/**
+ * Normalizes a profile from the canister format to the frontend format
+ */
+const normalizeProfileFromCanister = (profile: UserProfile): UserProfileExtended => {
+  return {
+    ...profile,
+    xpBalance: Number(profile.xpBalance || 0n),
+    reputation: Number(profile.reputation || 0n),
+    createdAt: new Date(Number(profile.createdAt || 0n) / 1000000),
+    updatedAt: new Date(Number(profile.updatedAt || 0n) / 1000000),
+    coverUrl: profile.coverUrl || '',
+    socialLinks: Object.fromEntries(profile.socialLinks || [])
+  };
+};
+
+/**
+ * Gets the current user's profile
+ */
+export async function getMyProfile(): Promise<UserProfileExtended> {
+  try {
+    const actor = await getActor();
+    const result = await actor.getMyProfile();
+    
+    if (!result) {
+      throw new Error('Profile not found');
+    }
+    
+    return normalizeProfileFromCanister(result);
+  } catch (error) {
+    console.error('Error getting profile:', error);
+    throw error;
+  }
+}
+
+/**
+ * Updates the current user's profile
+ */
+export async function updateProfile(updates: Partial<UserProfile>): Promise<UserProfileExtended> {
+  try {
+    const actor = await getActor();
+    const result = await actor.updateProfile(updates);
+    
+    if ('err' in result) {
+      throw new Error(result.err);
+    }
+    
+    return normalizeProfileFromCanister(result.ok);
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    throw error;
+  }
+}
+
+/**
+ * Uploads a file to the user's profile
+ */
+export async function uploadFile(file: File, category: string = 'other', tags: string[] = []): Promise<UserFile> {
+  try {
+    const actor = await getActor();
+    const objectKey = `${Date.now()}-${file.name}`;
+    const fileUrl = await uploadToAssetCanister(file, objectKey);
+    
+    const result = await actor.uploadFile(
+      file.name,
+      file.type || 'application/octet-stream',
+      BigInt(file.size),
+      fileUrl,
+      `Uploaded file: ${file.name}`,
+      tags
+    );
+    
+    if ('err' in result) {
+      throw new Error(result.err);
+    }
+    
+    return result.ok;
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    throw error;
+  }
+}
+
+/**
+ * Gets the current user's XP balance
+ */
+export async function getXPBalance(): Promise<number> {
+  try {
+    const actor = await getActor();
+    const balance = await actor.getXPBalance();
+    return Number(balance);
+  } catch (error) {
+    console.error('Error getting XP balance:', error);
+    return 0;
+  }
+}
+
+/**
+ * Adds XP to the current user's balance
+ */
+export async function addXP(amount: number, reason: string, source: string, metadata: string = ''): Promise<bigint> {
+  try {
+    const actor = await getActor();
+    const result = await actor.addXP(BigInt(amount), reason, source, metadata);
+    
+    if ('err' in result) {
+      throw new Error(result.err);
+    }
+    
+    return result.ok;
+  } catch (error) {
+    console.error('Error adding XP:', error);
+    throw error;
+  }
+}
+
+/**
+ * Adds a social link to the user's profile
+ */
+export async function addSocialLink(platform: string, url: string): Promise<UserProfileExtended> {
+  try {
+    const actor = await getActor();
+    const result = await actor.addSocialLink(platform, url);
+    
+    if ('err' in result) {
+      throw new Error(result.err);
+    }
+    
+    return normalizeProfileFromCanister(result.ok);
+  } catch (error) {
+    console.error('Error adding social link:', error);
+    throw error;
+  }
+}
+
+/**
+ * Removes a social link from the user's profile
+ */
+export async function removeSocialLink(platform: string): Promise<UserProfileExtended> {
+  try {
+    const actor = await getActor();
+    const result = await actor.removeSocialLink(platform);
+    
+    if ('err' in result) {
+      throw new Error(result.err);
+    }
+    
+    return normalizeProfileFromCanister(result.ok);
+  } catch (error) {
+    console.error('Error removing social link:', error);
+    throw error;
+  }
+}
+
+/**
+ * Gets the current user's files
+ */
+export async function getMyFiles(): Promise<UserFile[]> {
+  try {
+    const actor = await getActor();
+    return await actor.getMyFiles();
+  } catch (error) {
+    console.error('Error getting files:', error);
+    return [];
+  }
+}

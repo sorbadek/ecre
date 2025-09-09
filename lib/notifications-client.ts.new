@@ -1,0 +1,376 @@
+import { type Identity, AnonymousIdentity } from "@dfinity/agent"
+import { ActorSubclass } from "@dfinity/agent"
+import { idlFactory } from "./ic/notifications.idl"
+import { createActor, NOTIFICATIONS_CANISTER_ID } from "./ic/agent"
+import type { _SERVICE as NotificationsService } from "./ic/notifications.idl"
+
+console.log('Notifications client initialized with canister ID:', NOTIFICATIONS_CANISTER_ID)
+
+export type ActivityType = 
+  | { comment: null }
+  | { quiz_completed: null }
+  | { deadline_approaching: null }
+  | { course_available: null }
+  | { achievement_earned: null }
+  | { session_joined: null }
+  | { partner_request: null }
+  | { system_update: null };
+
+export interface Activity {
+  id: string;
+  userId: string;
+  activityType: ActivityType;
+  title: string;
+  description?: string;
+  metadata?: string;
+  timestamp: bigint;
+  priority: number;
+  isRead: boolean;
+  expiresAt?: bigint;
+}
+
+export interface NotificationPreferences {
+  userId: string;
+  activityTypes: ActivityType[];
+  weeklyDigest: boolean;
+  emailNotifications: boolean;
+  inAppNotifications: boolean;
+  pushNotifications: boolean;
+  marketingEmails?: boolean;
+}
+
+export class NotificationsClient {
+  private actor: ActorSubclass<NotificationsService> | null = null;
+  private identity: Identity | null = null;
+
+  // Set the identity from the auth context
+  public setIdentity(identity: Identity | null): void {
+    this.identity = identity;
+    // Clear the actor when identity changes to force recreation
+    this.actor = null;
+  }
+
+  private async getActor(): Promise<ActorSubclass<NotificationsService>> {
+    if (this.actor) return this.actor;
+
+    try {
+      this.actor = await createActor({
+        canisterId: NOTIFICATIONS_CANISTER_ID,
+        idlFactory,
+        identity: this.identity || undefined
+      });
+      return this.actor;
+    } catch (error) {
+      console.error('Failed to create actor:', error);
+      throw new Error('Failed to initialize notifications client');
+    }
+  }
+
+  async createActivity(
+    activityType: ActivityType,
+    title: string,
+    description: string = '',
+    metadata: string = '',
+    priority: number = 1,
+    expiresAt?: bigint
+  ): Promise<Activity> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.create_activity({
+        activity_type: activityType,
+        title,
+        description,
+        metadata,
+        priority: BigInt(priority),
+        expires_at: expiresAt ? [BigInt(expiresAt)] : []
+      });
+      
+      if ('ok' in result) {
+        const activity = result.ok;
+        return {
+          id: activity.id.toString(),
+          userId: activity.user_id.toString(),
+          activityType: activity.activity_type,
+          title: activity.title,
+          description: activity.description,
+          metadata: activity.metadata,
+          timestamp: activity.timestamp,
+          priority: Number(activity.priority),
+          isRead: activity.is_read,
+          expiresAt: activity.expires_at[0] || undefined
+        };
+      } else {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to create activity'
+        );
+      }
+    } catch (error) {
+      console.error('Error creating activity:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to create activity');
+    }
+  }
+
+  async getActivities(limit: number = 10, offset: number = 0): Promise<Activity[]> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.get_my_activities({
+        limit: BigInt(limit),
+        offset: BigInt(offset)
+      });
+      
+      if ('ok' in result) {
+        return result.ok.map((activity: any) => ({
+          id: activity.id.toString(),
+          userId: activity.user_id.toString(),
+          activityType: activity.activity_type,
+          title: activity.title,
+          description: activity.description,
+          metadata: activity.metadata,
+          timestamp: activity.timestamp,
+          priority: Number(activity.priority),
+          isRead: activity.is_read,
+          expiresAt: activity.expires_at[0] || undefined
+        }));
+      } else {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to fetch activities'
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching activities:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to fetch activities');
+    }
+  }
+
+  async markAsRead(activityId: string): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.mark_as_read({ id: activityId });
+      
+      if ('err' in result) {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to mark activity as read'
+        );
+      }
+    } catch (error) {
+      console.error('Error marking activity as read:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to mark activity as read');
+    }
+  }
+
+  async markAllAsRead(): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.mark_all_as_read();
+      
+      if ('err' in result) {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to mark all activities as read'
+        );
+      }
+    } catch (error) {
+      console.error('Error marking all activities as read:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to mark all activities as read');
+    }
+  }
+
+  async getUnreadCount(): Promise<number> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.get_unread_count();
+      
+      if ('ok' in result) {
+        return Number(result.ok);
+      } else {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to get unread count'
+        );
+      }
+    } catch (error) {
+      console.error('Error getting unread count:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to get unread count');
+    }
+  }
+
+  async deleteActivity(activityId: string): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.delete_activity({ id: activityId });
+      
+      if ('err' in result) {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to delete activity'
+        );
+      }
+    } catch (error) {
+      console.error('Error deleting activity:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to delete activity');
+    }
+  }
+
+  async getActivity(activityId: string): Promise<Activity | null> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.get_activity({ id: activityId });
+      
+      if ('ok' in result) {
+        const activity = result.ok[0];
+        if (!activity) return null;
+        
+        return {
+          id: activity.id.toString(),
+          userId: activity.user_id.toString(),
+          activityType: activity.activity_type,
+          title: activity.title,
+          description: activity.description,
+          metadata: activity.metadata,
+          timestamp: activity.timestamp,
+          priority: Number(activity.priority),
+          isRead: activity.is_read,
+          expiresAt: activity.expires_at[0] || undefined
+        };
+      } else {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to fetch activity'
+        );
+      }
+    } catch (error) {
+      console.error('Error getting activity:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to fetch activity');
+    }
+  }
+
+  async updateNotificationPreferences(prefs: Partial<NotificationPreferences>): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      
+      // Convert the preferences to the expected format
+      const updateData = {
+        activity_types: prefs.activityTypes || [],
+        weekly_digest: prefs.weeklyDigest ?? true,
+        email_notifications: prefs.emailNotifications ?? true,
+        in_app_notifications: prefs.inAppNotifications ?? true,
+        push_notifications: prefs.pushNotifications ?? true,
+        marketing_emails: prefs.marketingEmails ?? false
+      };
+      
+      const result = await actor.update_notification_preferences(updateData);
+      
+      if ('err' in result) {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to update notification preferences'
+        );
+      }
+    } catch (error) {
+      console.error('Error updating notification preferences:', error);
+      // Don't throw error since this is a non-critical feature
+    }
+  }
+
+  async getNotificationPreferences(): Promise<NotificationPreferences> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.get_notification_preferences();
+      
+      if ('ok' in result) {
+        const prefs = result.ok;
+        return {
+          userId: prefs.user_id.toString(),
+          activityTypes: prefs.activity_types,
+          weeklyDigest: prefs.weekly_digest,
+          emailNotifications: prefs.email_notifications,
+          inAppNotifications: prefs.in_app_notifications,
+          pushNotifications: prefs.push_notifications,
+          marketingEmails: prefs.marketing_emails
+        };
+      } else {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to fetch notification preferences'
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching notification preferences:', error);
+      // Return default preferences on error
+      return {
+        userId: this.identity?.getPrincipal()?.toString() || "",
+        activityTypes: [
+          { comment: null },
+          { quiz_completed: null },
+          { deadline_approaching: null },
+          { course_available: null },
+          { achievement_earned: null },
+          { session_joined: null },
+          { partner_request: null },
+          { system_update: null }
+        ],
+        weeklyDigest: true,
+        emailNotifications: true,
+        inAppNotifications: true,
+        pushNotifications: true,
+        marketingEmails: false
+      };
+    }
+  }
+
+  async cleanupExpiredActivities(): Promise<void> {
+    try {
+      const actor = await this.getActor();
+      const result = await actor.cleanup_expired_activities();
+      
+      if ('err' in result) {
+        throw new Error(
+          typeof result.err === 'string' 
+            ? result.err 
+            : 'Failed to clean up expired activities'
+        );
+      }
+    } catch (error) {
+      console.error('Error cleaning up expired activities:', error);
+      throw error instanceof Error 
+        ? error 
+        : new Error('Failed to clean up expired activities');
+    }
+  }
+
+  // Helper method for backward compatibility
+  async getMyActivities(limit: number = 10): Promise<Activity[]> {
+    return this.getActivities(limit, 0);
+  }
+}
+
+// Export a single instance of NotificationsClient
+const notificationsClient = new NotificationsClient();
+
+export { notificationsClient };

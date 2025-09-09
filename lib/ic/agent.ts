@@ -49,47 +49,48 @@ export const AUTH_CONFIG = {
 // Custom fetch with CBOR and CORS support
 export const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   // Create URL object from input
-  const requestUrl = new URL(input.toString())
+  const originalUrl = new URL(input.toString());
   
   // Check if this is a local development environment
   const isLocal = typeof window !== 'undefined' && 
     (window.location.hostname === 'localhost' || 
      window.location.hostname === '127.0.0.1');
   
-  // For local development with IC API calls, ensure we're using the right host and protocol
-  if (isLocal) {
-    const localReplicaUrl = new URL('http://127.0.0.1:4943');
-    requestUrl.protocol = localReplicaUrl.protocol;
-    requestUrl.hostname = localReplicaUrl.hostname;
-    requestUrl.port = localReplicaUrl.port;
-    
-    // Add no-cache headers for IC API calls
-    requestUrl.searchParams.set('_', Date.now().toString());
-  }
-  
-  // Create new headers object
+  // Create new headers object from init headers or empty object
   const headers = new Headers(init?.headers);
   
-  // Set default headers
+  // Set default headers if not already set
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/cbor');
   }
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/cbor');
   }
+
+  // Initialize request URL
+  let requestUrl = new URL(originalUrl.toString());
   
-  // For local development, route through our Next.js API
-  let requestUrlString = input.toString();
-  
-  // If this is a request to the IC replica, route it through our API
-  if (isLocal && (requestUrlString.includes('127.0.0.1:4943') || requestUrlString.includes('localhost:4943'))) {
-    // Convert to our API route
-    const path = new URL(requestUrlString).pathname.replace(/^\/api\//, '');
-    requestUrlString = `/api/ic/${path}${new URL(requestUrlString).search}`;
+  // For local development, route IC replica requests through our Next.js API proxy
+  if (isLocal) {
+    const isIcReplicaRequest = 
+      requestUrl.hostname === '127.0.0.1' && 
+      requestUrl.port === '4943';
     
-    // Update the request URL to be relative to our domain
-    if (typeof window !== 'undefined') {
-      requestUrlString = `${window.location.origin}${requestUrlString}`;
+    if (isIcReplicaRequest) {
+      // Construct the path for our Next.js API proxy
+      const apiPath = `/api/ic${requestUrl.pathname}${requestUrl.search}`;
+      
+      // Create a new URL that points to our Next.js API
+      const proxyUrl = new URL(apiPath, window.location.origin);
+      
+      // Update the request URL to use our proxy
+      requestUrl = proxyUrl;
+      
+      // Remove any host headers that might interfere with the proxy
+      headers.delete('host');
+      
+      // Add a cache-buster to prevent caching of API responses
+      requestUrl.searchParams.set('_', Date.now().toString());
     }
   }
   

@@ -8,7 +8,7 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
-    domains: ['localhost', 'ic0.app', '127.0.0.1'],
+    domains: ['localhost', 'ic0.app'],
   },
   // Enable static exports for static site generation
   output: 'standalone',
@@ -16,77 +16,78 @@ const nextConfig = {
   pageExtensions: ['tsx', 'ts', 'jsx', 'js'],
   // Add base path if needed
   basePath: '',
-  // CORS configuration
-  async headers() {
-    return [
-      {
-        // matching all API routes
-        source: '/api/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Credentials', value: 'true' },
-          { key: 'Access-Control-Allow-Origin', value: 'http://localhost:3000' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET,DELETE,PATCH,POST,PUT,OPTIONS' },
-          { key: 'Access-Control-Allow-Headers', value: 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version' },
-        ]
-      }
-    ]
-  },
   // Configure webpack
-  webpack: (config, { isServer, dev }) => {
-    // Handle node: protocol
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      // Map node: protocol imports to browser-compatible alternatives
-      'node:path': 'path-browserify',
-      'node:process': 'process/browser',
-      'node:stream': 'stream-browserify',
-      'node:util': 'util',
-      'node:url': 'url',
-      'node:zlib': 'browserify-zlib',
-      'node:stream/web': 'stream-browserify',
-    };
-
-    // Add fallback for Node.js modules
-    config.resolve.fallback = {
-      ...(config.resolve.fallback || {}),
-      // Browser-compatible alternatives for Node.js built-ins
-      path: 'path-browserify',
-      stream: 'stream-browserify',
-      util: 'util/',
-      url: 'url/',
-      zlib: 'browserify-zlib',
-      // Disable Node.js built-ins that aren't needed in the browser
-      fs: false,
-      net: false,
-      tls: false,
-      dns: false,
-      child_process: false,
-    };
-
-    // For client-side only
+  webpack: (config, { isServer }) => {
+    // Fixes npm packages that depend on `fs` module
     if (!isServer) {
-      // Add client-side specific configurations if needed
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        os: false,
+      };
     }
-
-    // For development mode only
-    if (dev) {
-      // Add development specific configurations if needed
-    }
-
     return config;
   },
-  // Handle static file serving in production
+  // CORS headers for all API routes
   async headers() {
     return [
       {
-        source: '/_next/:path*',
+        // Match all API routes
+        source: '/api/:path*',
         headers: [
           { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET, OPTIONS' },
-          { key: 'Access-Control-Allow-Headers', value: 'Content-Type' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
+          { key: 'Access-Control-Allow-Credentials', value: 'true' },
+        ],
+      },
+      // Handle preflight requests for IC replica
+      {
+        source: '/api/v2/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
+          { key: 'Access-Control-Allow-Credentials', value: 'true' },
+        ],
+      },
+      {
+        source: '/api/v3/canister/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
+          { key: 'Access-Control-Allow-Credentials', value: 'true' },
         ],
       },
     ];
+  },
+  // Proxy configuration for development
+  async rewrites() {
+    return [
+      // Proxy API requests to IC replica
+      {
+        source: '/api/v2/:path*',
+        destination: 'http://127.0.0.1:4943/api/v2/:path*',
+      },
+      {
+        source: '/api/v3/canister/:path*',
+        destination: 'http://127.0.0.1:4943/api/v3/canister/:path*',
+      },
+    ];
+  },
+  // Webpack configuration
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        os: false,
+      };
+    }
+    return config;
   },
 };
 

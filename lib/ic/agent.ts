@@ -78,27 +78,31 @@ export const customFetch = async (input: RequestInfo | URL, init?: RequestInit):
     headers.set('Accept', 'application/cbor');
   }
   
-  // For local development, handle CORS and other headers
+  // For local development, route through our Next.js API
+  let requestUrlString = input.toString();
+  
+  // If this is a request to the IC replica, route it through our API
+  if (isLocal && (requestUrlString.includes('127.0.0.1:4943') || requestUrlString.includes('localhost:4943'))) {
+    // Convert to our API route
+    const path = new URL(requestUrlString).pathname.replace(/^\/api\//, '');
+    requestUrlString = `/api/ic/${path}${new URL(requestUrlString).search}`;
+    
+    // Update the request URL to be relative to our domain
+    if (typeof window !== 'undefined') {
+      requestUrlString = `${window.location.origin}${requestUrlString}`;
+    }
+  }
+  
   const requestInit: RequestInit = {
     ...init,
     headers,
     mode: 'cors',
-    credentials: 'omit',
+    credentials: 'include', // Changed to include credentials for our API
   };
-  
-  if (isLocal) {
-    // Add CORS headers for local development
-    if (typeof window !== 'undefined') {
-      headers.set('Origin', window.location.origin);
-    }
-    headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    headers.set('Access-Control-Allow-Credentials', 'true');
-  }
   
   try {
     // Make the fetch request
-    const response = await fetch(requestUrl.toString(), requestInit);
+    const response = await fetch(requestUrlString, requestInit);
     
     // Check for CORS errors
     if (!response.ok && response.type === 'opaque') {

@@ -49,7 +49,7 @@ export const AUTH_CONFIG = {
 // Custom fetch with CBOR and CORS support
 export const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   // Create URL object from input
-  const originalUrl = new URL(input.toString());
+  const url = new URL(input.toString());
   
   // Check if this is a local development environment
   const isLocal = typeof window !== 'undefined' && 
@@ -67,43 +67,45 @@ export const customFetch = async (input: RequestInfo | URL, init?: RequestInit):
     headers.set('Accept', 'application/cbor');
   }
 
-  // Initialize request URL
-  let requestUrl = new URL(originalUrl.toString());
+  // For IC API requests, we need to handle CORS specially
+  const isICApiRequest = url.hostname === '127.0.0.1' && url.port === '4943';
   
-  // For local development, route IC replica requests through our Next.js API proxy
-  if (isLocal) {
-    const isIcReplicaRequest = 
-      requestUrl.hostname === '127.0.0.1' && 
-      requestUrl.port === '4943';
-    
-    if (isIcReplicaRequest) {
-      // Construct the path for our Next.js API proxy
-      const apiPath = `/api/ic${requestUrl.pathname}${requestUrl.search}`;
-      
-      // Create a new URL that points to our Next.js API
-      const proxyUrl = new URL(apiPath, window.location.origin);
-      
-      // Update the request URL to use our proxy
-      requestUrl = proxyUrl;
-      
-      // Remove any host headers that might interfere with the proxy
-      headers.delete('host');
-      
-      // Add a cache-buster to prevent caching of API responses
-      requestUrl.searchParams.set('_', Date.now().toString());
-    }
-  }
-  
+  // Configure request init with proper CORS settings
   const requestInit: RequestInit = {
     ...init,
     headers,
-    mode: 'cors',
-    credentials: 'include', // Changed to include credentials for our API
+    mode: isICApiRequest ? 'cors' : 'same-origin',
+    // Only include credentials for same-origin requests or when explicitly needed
+    credentials: isICApiRequest ? 'omit' : 'same-origin',
   };
   
   try {
+    // For IC API requests, we need to go through a proxy
+    let targetUrl = input;
+    if (isLocal) {
+      // Always use the ic-proxy endpoint for local development
+      const proxyUrl = new URL('/api/ic-proxy', window.location.origin);
+      
+      // For IC API requests, use the full URL as a parameter
+      if (isICApiRequest) {
+        proxyUrl.searchParams.set('url', url.toString());
+      } else {
+        // For other API requests, just forward the path
+        proxyUrl.searchParams.set('url', `${HOST}${url.pathname}${url.search}`);
+      }
+      
+      targetUrl = proxyUrl.toString();
+      
+      // Remove CORS headers for the proxy request
+      headers.delete('Origin');
+      requestInit.mode = 'same-origin';
+      requestInit.credentials = 'same-origin';
+      
+      console.log('Proxying request to:', targetUrl);
+    }
+    
     // Make the fetch request
-    const response = await fetch(requestUrlString, requestInit);
+    const response = await fetch(targetUrl, requestInit);
     
     // Check for CORS errors
     if (!response.ok && response.type === 'opaque') {

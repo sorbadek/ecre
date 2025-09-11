@@ -25,7 +25,7 @@ interface SessionCreationFormProps {
 
 export default function SessionCreationForm({ onCancel, onSessionCreated }: SessionCreationFormProps) {
   const [loading, setLoading] = useState(false)
-  const [selectedType, setSelectedType] = useState<"video" | "voice">("video")
+  const [selectedType, setSelectedType] = useState<{ video: null } | { voice: null }>({ video: null })
   const [date, setDate] = useState<Date>()
   const [time, setTime] = useState("")
   const [tags, setTags] = useState<string[]>([])
@@ -37,9 +37,10 @@ export default function SessionCreationForm({ onCancel, onSessionCreated }: Sess
     description: "",
     duration: 60,
     maxAttendees: 10,
+    recordSession: false
   })
 
-  const handleInputChange = (field: string, value: string | number) => {
+  const handleInputChange = (field: string, value: string | number | boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
@@ -86,17 +87,28 @@ export default function SessionCreationForm({ onCancel, onSessionCreated }: Sess
       const scheduledDateTime = new Date(selectedDate)
       scheduledDateTime.setHours(hours, minutes, 0, 0)
       
-      // Get timezone offset in minutes and convert to milliseconds
-      const timezoneOffsetMs = scheduledDateTime.getTimezoneOffset() * 60 * 1000
-      // Convert to UTC by adding the timezone offset
-      const utcTime = scheduledDateTime.getTime() + timezoneOffsetMs
+      // Convert to UTC timestamp in milliseconds since epoch
+      const utcTimestamp = Date.UTC(
+        scheduledDateTime.getFullYear(),
+        scheduledDateTime.getMonth(),
+        scheduledDateTime.getDate(),
+        scheduledDateTime.getHours(),
+        scheduledDateTime.getMinutes(),
+        scheduledDateTime.getSeconds()
+      )
+      
       // Convert to nanoseconds (IC uses nanoseconds since epoch)
-      const scheduledTimeNs = BigInt(utcTime) * 1_000_000n
+      const scheduledTimeNs = BigInt(utcTimestamp) * 1_000_000n
+      
+      console.log('Scheduled time (local):', scheduledDateTime.toString())
+      console.log('Scheduled time (UTC):', new Date(utcTimestamp).toISOString())
+      console.log('Scheduled time (ns):', scheduledTimeNs.toString())
 
-      const sessionInput: CreateSessionInput = {
+      // Create the session input
+      const sessionInput = {
         title: formData.title,
         description: formData.description,
-        sessionType: selectedType === "video" ? { video: null } : { voice: null },
+        sessionType: selectedType,
         scheduledTime: scheduledTimeNs,
         duration: formData.duration,
         maxAttendees: formData.maxAttendees,
@@ -104,7 +116,8 @@ export default function SessionCreationForm({ onCancel, onSessionCreated }: Sess
         hostName: user.name || "Anonymous",
         hostAvatar: user.avatar || "/placeholder.svg?height=40&width=40",
         tags,
-      }
+        recordSession: formData.recordSession || false,
+      } as const;
 
       const newSession = await sessionClient.createSession(sessionInput)
       onSessionCreated(newSession)
@@ -143,25 +156,31 @@ export default function SessionCreationForm({ onCancel, onSessionCreated }: Sess
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <Button
+            <div className="flex space-x-4 mb-4">
+              <button
                 type="button"
-                variant={selectedType === "video" ? "default" : "outline"}
-                className={cn("h-20 flex-col space-y-2", selectedType === "video" && "bg-blue-600 hover:bg-blue-700")}
-                onClick={() => setSelectedType("video")}
+                className={`flex-1 flex items-center justify-center p-4 rounded-lg border-2 transition-colors ${
+                  'video' in selectedType
+                    ? "border-primary bg-primary/10"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+                onClick={() => setSelectedType({ video: null })}
               >
-                <Video className="w-6 h-6" />
-                <span>Video Session</span>
-              </Button>
-              <Button
+                <Video className="w-6 h-6 mr-2" />
+                <span>Video Call</span>
+              </button>
+              <button
                 type="button"
-                variant={selectedType === "voice" ? "default" : "outline"}
-                className={cn("h-20 flex-col space-y-2", selectedType === "voice" && "bg-blue-600 hover:bg-blue-700")}
-                onClick={() => setSelectedType("voice")}
+                className={`flex-1 flex items-center justify-center p-4 rounded-lg border-2 transition-colors ${
+                  'voice' in selectedType
+                    ? "border-primary bg-primary/10"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+                onClick={() => setSelectedType({ voice: null })}
               >
-                <Mic className="w-6 h-6" />
-                <span>Voice Session</span>
-              </Button>
+                <Mic className="w-6 h-6 mr-2" />
+                <span>Voice Call</span>
+              </button>
             </div>
           </CardContent>
         </Card>
@@ -172,27 +191,52 @@ export default function SessionCreationForm({ onCancel, onSessionCreated }: Sess
             <CardTitle className="text-lg">Basic Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="title">Session Title *</Label>
-              <Input
-                id="title"
-                value={formData.title}
-                onChange={(e) => handleInputChange("title", e.target.value)}
-                placeholder="Enter session title"
-                required
-              />
-            </div>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="title" className="text-right">
+                  Title
+                </Label>
+                <Input
+                  id="title"
+                  value={formData.title}
+                  onChange={(e) => handleInputChange("title", e.target.value)}
+                  className="col-span-3"
+                  required
+                />
+              </div>
+              
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="recordSession" className="text-right">
+                  Record Session
+                </Label>
+                <div className="flex items-center space-x-2 col-span-3">
+                  <input
+                    type="checkbox"
+                    id="recordSession"
+                    checked={formData.recordSession as boolean}
+                    onChange={(e) => handleInputChange("recordSession", e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-500">
+                    Record this session (can be downloaded later)
+                  </span>
+                </div>
+              </div>
 
-            <div>
-              <Label htmlFor="description">Description *</Label>
-              <Textarea
-                id="description"
-                value={formData.description}
-                onChange={(e) => handleInputChange("description", e.target.value)}
-                placeholder="Describe what you'll be teaching"
-                rows={4}
-                required
-              />
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="description" className="text-right">
+                  Description
+                </Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => handleInputChange("description", e.target.value)}
+                  className="col-span-3"
+                  placeholder="Describe what you'll be teaching"
+                  rows={4}
+                  required
+                />
+              </div>
             </div>
           </CardContent>
         </Card>

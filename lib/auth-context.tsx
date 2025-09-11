@@ -19,7 +19,7 @@ interface User {
   avatar?: string
   xp?: number
   reputation?: number
-  principal?: string // This is the PRIMARY IDENTIFIER
+  principal?: string
 }
 
 interface AuthContextType {
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const authClientRef = useRef<AuthClient | null>(null)
-  const sessionClientRef = useRef<SessionClient | null>(null)
+  const sessionClient = useMemo(() => SessionClient.getInstance(), [])
 
   // Define the identity provider URL based on the environment
   const identityProvider = useMemo(() => {
@@ -55,60 +55,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return isLocalhost ? II_LOCAL_URL : II_PROD_URL
   }, [])
 
-  // Initialize or update session client when user changes
+  // Update session client identity when auth state changes
   useEffect(() => {
-    if (user?.principal) {
-      console.log('[AuthContext] User principal detected, initializing session client');
-      
-      // Create a new session client
-      const client = new SessionClient();
-      sessionClientRef.current = client;
-      
-      // Set identity if auth client is available
-      const setIdentityIfAvailable = async () => {
+    const updateSessionClientIdentity = async () => {
+      if (user?.principal && authClientRef.current) {
+        console.log('[AuthContext] Updating session client identity');
         try {
-          const authClient = authClientRef.current;
-          if (authClient) {
-            console.log('[AuthContext] Auth client available, getting identity');
+          const identity = authClientRef.current.getIdentity();
+          if (identity) {
+            console.log('[AuthContext] Setting identity on session client');
+            sessionClient.setIdentity(identity);
             
-            // Check if getIdentity exists and is a function before calling it
-            if (typeof authClient.getIdentity === 'function') {
-              const identity = authClient.getIdentity();
-              if (identity) {
-                console.log('[AuthContext] Setting identity on session client');
-                client.setIdentity(identity);
-                
-                // Verify the identity was set correctly
-                const actor = await client.getActor(true).catch(e => {
-                  console.error('[AuthContext] Failed to initialize actor with identity:', e);
-                  return null;
-                });
-                
-                if (actor) {
-                  console.log('[AuthContext] Successfully initialized actor with identity');
-                } else {
-                  console.warn('[AuthContext] Failed to initialize actor with identity');
-                }
-              } else {
-                console.warn('[AuthContext] No identity available from auth client');
-              }
-            } else {
-              console.warn('[AuthContext] authClient.getIdentity is not a function');
+            // Verify the identity was set correctly
+            try {
+              await sessionClient.getActor(true);
+              console.log('[AuthContext] Successfully initialized actor with identity');
+            } catch (e) {
+              console.error('[AuthContext] Failed to initialize actor with identity:', e);
             }
-          } else {
-            console.warn('[AuthContext] No auth client available');
           }
         } catch (error) {
-          console.error('[AuthContext] Error setting identity on session client:', error);
+          console.error('[AuthContext] Error updating session client identity:', error);
         }
-      };
-      
-      void setIdentityIfAvailable()
-    } else {
-      sessionClientRef.current = null
-    }
-  }, [user?.principal])
+      } else {
+        // Clear identity when user logs out
+        sessionClient.setIdentity(null);
+      }
+    };
+    
+    updateSessionClientIdentity();
+  }, [user, sessionClient]);
 
+  // Initialize auth client
   useEffect(() => {
     let mounted = true
 
@@ -118,35 +96,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!mounted) return
         authClientRef.current = client
 
-        const alreadyAuthenticated = await client.isAuthenticated()
-        if (alreadyAuthenticated) {
+        const isAuthenticated = await client.isAuthenticated()
+        if (isAuthenticated) {
           const identity = client.getIdentity()
-          const principal = identity.getPrincipal().toText()
-
-          // Initialize session client and set the identity
-          const sessionClient = new SessionClient()
-          sessionClient.setIdentity(identity)
-          sessionClientRef.current = sessionClient
-
-          const hydratedUser: User = {
+          const principal = identity.getPrincipal().toString()
+          setUser({
             id: principal,
-            name: `User ${principal.slice(0, 5)}…`,
+            name: `User ${principal.slice(0, 5)}...`,
+            principal,
+            email: '',
             avatar: "/generic-user-avatar.png",
             xp: 1250,
-            reputation: 4.8,
-            principal,
-          }
-          setUser(hydratedUser)
-        } else {
-          setUser(null)
-          sessionClientRef.current = null
+            reputation: 4.8
+          })
+          
+          sessionClient.setIdentity(identity)
         }
-      } catch (e) {
-        console.error("Failed to initialize AuthClient:", e)
-        setUser(null)
-        sessionClientRef.current = null
+      } catch (error) {
+        console.error('Failed to initialize auth client:', error)
       } finally {
-        if (mounted) setLoading(false)
+        if (mounted) {
+          setLoading(false)
+        }
       }
     }
 
@@ -154,70 +125,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false
     }
-  }, [identityProvider])
+  }, [sessionClient, identityProvider])
 
   const login = async () => {
-    setLoading(true)
+    if (!authClientRef.current) {
+      console.error('Auth client not initialized')
+      return
+    }
+
     try {
-      const client = authClientRef.current ?? (await AuthClient.create())
-      authClientRef.current = client
-
-      if (await client.isAuthenticated()) {
-        const identity = client.getIdentity()
-        const principal = identity.getPrincipal().toText()
-        
-        // Initialize or update session client with the new identity
-        const sessionClient = new SessionClient()
-        sessionClientRef.current = sessionClient
-        
-        setUser((prev) => ({
-          id: principal,
-          name: prev?.name ?? `User ${principal.slice(0, 5)}…`,
-          avatar: prev?.avatar ?? "/generic-user-avatar.png",
-          xp: prev?.xp ?? 1250,
-          reputation: prev?.reputation ?? 4.8,
-          principal,
-        }));
-        setLoading(false);
-        return;
-      }
-
+      setLoading(true)
+      console.log('Starting login flow with identity provider:', identityProvider)
+      
       await new Promise<void>((resolve, reject) => {
-        client.login({
+        authClientRef.current?.login({
           identityProvider,
           maxTimeToLive: EIGHT_HOURS_NS,
           onSuccess: async () => {
             try {
-              // Initialize session client after successful login
-              const sessionClient = new SessionClient();
-              const identity = client.getIdentity();
-              if (identity) {
-                sessionClient.setIdentity(identity);
+              const identity = authClientRef.current?.getIdentity()
+              if (!identity) {
+                throw new Error('No identity after successful login')
               }
-              sessionClientRef.current = sessionClient;
-              resolve();
+              
+              const principal = identity.getPrincipal().toString()
+              console.log('Login successful, principal:', principal)
+              
+              // Set the identity on the session client
+              sessionClient.setIdentity(identity)
+              
+              // Verify the session client can create an actor
+              try {
+                await sessionClient.getActor(true)
+                console.log('Successfully initialized session client with identity')
+              } catch (e) {
+                console.error('Failed to initialize session client:', e)
+                throw e
+              }
+              
+              setUser({
+                id: principal,
+                name: `User ${principal.slice(0, 5)}...`,
+                principal,
+                email: '',
+                avatar: "/generic-user-avatar.png",
+                xp: 1250,
+                reputation: 4.8
+              })
+              
+              resolve()
             } catch (error) {
-              console.error('Failed to initialize session client:', error);
-              reject(error);
+              console.error('Error in login success handler:', error)
+              reject(error)
             }
           },
-          onError: (err) => reject(err),
-        });
-      });
-
-      const identity = client.getIdentity()
-      const principal = identity.getPrincipal().toText()
-      const hydratedUser: User = {
-        id: principal,
-        name: `User ${principal.slice(0, 5)}…`,
-        avatar: "/generic-user-avatar.png",
-        xp: 1250,
-        reputation: 4.8,
-        principal,
-      }
-      setUser(hydratedUser)
+          onError: (error) => {
+            console.error('Login error:', error)
+            reject(error)
+          }
+        })
+      })
+      
+      console.log('Login flow completed successfully')
     } catch (error) {
-      console.error("Internet Identity login failed:", error)
+      console.error('Login failed:', error)
+      throw error
     } finally {
       setLoading(false)
     }
@@ -232,18 +204,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setUser(null)
       authClientRef.current = null
-      // Clear session client on logout
-      sessionClientRef.current = null
-      // Clear any existing session client
       
-      setUser(null);
+      // Clear session client identity
+      sessionClient.setIdentity(null)
       
       // Clear user-specific cached data
       try {
-        localStorage.removeItem("peerverse_vault_items");
-        localStorage.removeItem("peerverse_user");
+        localStorage.removeItem("peerverse_vault_items")
+        localStorage.removeItem("peerverse_user")
       } catch (error) {
-        console.error('Error clearing local storage:', error);
+        console.error('Error clearing local storage:', error)
       }
     } catch (error) {
       console.error("Logout failed:", error)
@@ -253,52 +223,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const value: AuthContextType = {
-    user,
-    isAuthenticated: !!user,
-    login,
-    logout,
-    loading,
-    authClient: authClientRef.current,
-    sessionClient: sessionClientRef.current,
-    identity: null,
-  }
+  const value = useMemo(
+    () => ({
+      user,
+      isAuthenticated: !!user,
+      login,
+      logout,
+      loading,
+      authClient: authClientRef.current,
+      sessionClient,
+      identity: authClientRef.current?.getIdentity() || null,
+    }),
+    [user, loading, login, logout, sessionClient],
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider')
   }
-  
-  // Get the identity from the authClient if available
-  const getIdentity = (): Identity | null => {
-    try {
-      if (!ctx.authClient) return null
-      // Get the identity from the auth client
-      const authClient = ctx.authClient as any
-      if (authClient.getIdentity) {
-        // Call getIdentity without any arguments
-        const identity = authClient.getIdentity
-          ? authClient.getIdentity()
-          : null
-        // Set the identity in the session client if it exists
-        if (identity && ctx.sessionClient) {
-          ctx.sessionClient.setIdentity(identity)
-        }
-        return identity
-      }
-      return null
-    } catch (error) {
-      console.error('Error getting identity:', error)
-      return null
-    }
-  }
-  
-  return {
-    ...ctx,
-    identity: getIdentity()
-  }
+  return context
 }

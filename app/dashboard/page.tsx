@@ -180,7 +180,7 @@ export default function DashboardPage() {
       
       try {
         // Load notifications
-        const notifications = await notificationsClient.getMyActivities(5);
+        const notifications = await notificationsClient.getActivities(5n);
         setActivities(notifications || []);
 
         // Load learning partners

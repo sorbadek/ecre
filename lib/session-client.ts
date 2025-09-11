@@ -1,32 +1,82 @@
-import { Actor, HttpAgent, Identity, ActorSubclass } from "@dfinity/agent"
-import { Principal } from "@dfinity/principal"
-import { AuthClient } from "@dfinity/auth-client"
-import { idlFactory } from "./ic/sessions.idl"
-import { _SERVICE } from "./ic/sessions"
+import { Actor, HttpAgent, Identity, ActorSubclass, ActorMethod } from "@dfinity/agent";
+import { Principal } from "@dfinity/principal";
+import { AuthClient } from "@dfinity/auth-client";
+import { idlFactory } from "./ic/sessions.idl";
+import { _SERVICE, Session as ISession, CreateSessionInput as ICreateSessionInput, SessionStatus as ISessionStatus } from "./ic/sessions";
 
-// Session canister ID - using the provided canister ID
-const SESSIONS_CANISTER_ID = "br5f7-7uaaa-aaaaa-qaaca-cai";
+// Extend the _SERVICE interface to match our needs
+type SessionService = _SERVICE & {
+  createSession: ActorMethod<[ICreateSessionInput], { ok: ISession } | { err: string }>;
+  updateSession: ActorMethod<[string, Partial<ICreateSessionInput>], { ok: ISession } | { err: string }>;
+  joinSession: ActorMethod<[string], { ok: ISession } | { err: string }>;
+  getSession: ActorMethod<[string], ISession | null>;
+  getAllSessions: ActorMethod<[], ISession[]>;
+  getMySessions: ActorMethod<[], ISession[]>;
+  updateSessionStatus: ActorMethod<[string, ISessionStatus], { ok: ISession } | { err: string }>;
+  deleteSession: ActorMethod<[string], boolean>;
+  searchSessions: ActorMethod<[string], ISession[]>;
+  getCompletedSessions: ActorMethod<[], ISession[]>;
+  getSessionsByStatus: ActorMethod<[ISessionStatus], ISession[]>;
+  whoami: ActorMethod<[], Principal>;
+}
 
-// Host configuration
-const isLocal = typeof window !== "undefined" && 
-  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+// Constants
+// Get canister ID from environment variable or use default
+const DEFAULT_SESSIONS_CANISTER_ID = "br5f7-7uaaa-aaaaa-qaaca-cai";
+const SESSIONS_CANISTER_ID = process.env.NEXT_PUBLIC_SESSIONS_CANISTER_ID || DEFAULT_SESSIONS_CANISTER_ID;
 
-// Use the provided host URL for local development
-const HOST = isLocal 
-  ? "http://127.0.0.1:4943/api/v2" 
-  : "https://ic0.app";
+// Use the local replica port (default is 4943 for dfx)
+const LOCAL_HOST = "http://127.0.0.1:4943";
+const CANDID_INTERFACE = "by6od-j4aaa-aaaaa-qaadq-cai";
+const PRODUCTION_HOST = "https://ic0.app";
 
-console.log('Session client initialized with host:', HOST);
+console.log('[SessionClient] Using canister ID:', SESSIONS_CANISTER_ID);
 
-// Add fetch root key for local development
-const fetchRootKey = async (agent: HttpAgent) => {
-  if (isLocal) {
-    try {
-      await agent.fetchRootKey();
-      console.log('Successfully fetched root key for local development');
-    } catch (err) {
-      console.warn('Failed to fetch root key. This is expected in production.', err);
-    }
+// CORS configuration for local development
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+// Determine if we're in local development
+const isLocal = process.env.NODE_ENV !== 'production' || 
+  (typeof window !== 'undefined' && 
+   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
+
+// Configure host based on environment
+const HOST = isLocal ? LOCAL_HOST : PRODUCTION_HOST;
+
+// Log environment info
+console.log(`[SessionClient] Initialized in ${isLocal ? 'local' : 'production'} mode`);
+console.log(`[SessionClient] Using host: ${HOST}`);
+
+// Format error messages consistently
+const formatError = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (typeof error === 'object' && error !== null) {
+    return JSON.stringify(error);
+  }
+  return 'Unknown error';
+};
+
+// Helper to fetch root key for local development
+const fetchRootKey = async (agent: HttpAgent): Promise<boolean> => {
+  if (!isLocal) return false;
+  
+  try {
+    console.log('[SessionClient] Fetching root key for local development...');
+    await agent.fetchRootKey();
+    console.log('[SessionClient] Successfully fetched root key');
+    return true;
+  } catch (error) {
+    console.warn('[SessionClient] Could not fetch root key, continuing without it:', error);
+    return false;
   }
 };
 
@@ -45,10 +95,12 @@ export interface CreateSessionInput {
   scheduledTime: bigint;
   duration: number;
   maxAttendees: number;
-  price?: number; // Make price optional since it's not in all usages
+  price?: number;
   hostName: string;
   hostAvatar: string;
   tags: string[];
+  recordSession: boolean;
+  recordingUrl?: string | null;
 }
 
 export interface Session {
@@ -60,23 +112,42 @@ export interface Session {
   duration: number;
   maxAttendees: number;
   price?: number;
-  host: string; // Principal as string
+  host: string;
   hostName: string;
   hostAvatar: string;
   status: SessionStatus;
-  attendees: string[]; // Array of Principal strings
+  attendees: string[];
   createdAt: bigint;
   updatedAt: bigint;
   recordingUrl?: string | null;
   meetingUrl?: string | null;
   tags: string[];
+  recordSession: boolean;
   err?: any;
 }
 
+// Declare global type for window.sessionClient
+declare global {
+  interface Window {
+    sessionClient?: SessionClient;
+  }
+}
+
 export class SessionClient {
-  private actor: any = null;
+  private static instance: SessionClient;
+  private actor: ActorSubclass<SessionService> | null = null;
   private authClient: AuthClient | null = null;
   private currentIdentity: Identity | null = null;
+  private isInitialized = false;
+
+  private constructor() {}
+
+  public static getInstance(): SessionClient {
+    if (!SessionClient.instance) {
+      SessionClient.instance = new SessionClient();
+    }
+    return SessionClient.instance;
+  }
 
   private async getAuthClient(): Promise<AuthClient> {
     if (!this.authClient) {
@@ -87,535 +158,430 @@ export class SessionClient {
     return this.authClient;
   }
 
-  // Set identity for the client
-  setIdentity(identity: Identity | null): void {
+  public setIdentity(identity: Identity | null): void {
     this.currentIdentity = identity;
     this.actor = null; // Reset actor to force recreation with new identity
   }
 
-  async getActor(requireAuth = true): Promise<ActorSubclass<_SERVICE>> {
-    console.log(`[SessionClient] getActor called (requireAuth: ${requireAuth})`);
+  public async getActor(requireAuth = true): Promise<ActorSubclass<SessionService>> {
+    console.log('[SessionClient] Getting actor, requireAuth:', requireAuth);
     
+    if (requireAuth && !this.currentIdentity) {
+      console.warn('[SessionClient] Authentication required but no current identity');
+      throw new Error('User not authenticated');
+    }
+
+    // If we already have an actor and don't need to reinitialize, return it
+    if (this.actor && this.isInitialized) {
+      console.log('[SessionClient] Returning cached actor');
+      return this.actor;
+    }
+
     try {
-      const isLocal = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DFX_NETWORK === 'local';
-      const HOST = isLocal ? 'http://localhost:4943' : 'https://ic0.app';
+      console.log(`[SessionClient] Creating new agent for ${HOST} with canister ${SESSIONS_CANISTER_ID}`);
       
-      console.log(`[SessionClient] Initializing agent (environment: ${isLocal ? 'local' : 'production'})`);
-      
-      const agent = new HttpAgent({ 
+      const agent = new HttpAgent({
         host: HOST,
-        // Disable verification for local development
-        verifyQuerySignatures: !isLocal,
+        identity: this.currentIdentity || undefined,
+        fetchOptions: {
+          headers: isLocal ? CORS_HEADERS : undefined,
+          credentials: 'include',
+        },
       });
-      
-      // Configure API version for local development
+
+      // Only fetch root key in local development
       if (isLocal) {
-        console.log('[SessionClient] Configuring for local development');
-        (agent as any)._host = HOST.replace('/api/v2', '/api/v2');
-      }
-  
-      // Fetch root key for local development
-      if (isLocal) {
-        try {
-          console.log('[SessionClient] Fetching root key...');
-          await agent.fetchRootKey();
-          console.log('[SessionClient] Successfully fetched root key');
-        } catch (error) {
-          console.warn('[SessionClient] Could not fetch root key (expected in production):', error);
-        }
-      }
-  
-      // Handle authentication
-      if (requireAuth) {
-        if (this.currentIdentity) {
-          const principal = this.currentIdentity.getPrincipal();
-          console.log(`[SessionClient] Using authenticated identity: ${principal.toString()}`);
-          agent.replaceIdentity(this.currentIdentity);
-        } else {
-          console.warn('[SessionClient] Authentication required but no identity available');
-          throw new Error('Authentication required but no identity available');
-        }
+        console.log('[SessionClient] Fetching root key for local development');
+        await fetchRootKey(agent);
       } else {
-        console.log('[SessionClient] Using anonymous identity');
+        console.log('[SessionClient] Running in production mode, skipping root key fetch');
       }
 
-      // Create the actor
-      console.log(`[SessionClient] Creating actor for canister: ${SESSIONS_CANISTER_ID}`);
-      this.actor = Actor.createActor(idlFactory, {
+      // Create a new actor with the correct type
+      console.log('[SessionClient] Creating actor with canister ID:', SESSIONS_CANISTER_ID);
+      const actor = Actor.createActor<SessionService>(idlFactory, {
         agent,
         canisterId: SESSIONS_CANISTER_ID,
       });
-      
-      console.log('[SessionClient] Actor created successfully');
-      return this.actor;
-      
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[SessionClient] Error in getActor:', errorMessage, error);
-      
-      // Provide more specific error messages
-      if (errorMessage.includes('No device found')) {
-        throw new Error('No Internet Identity found. Please make sure you have an Internet Identity anchor set up.');
-      } else if (errorMessage.includes('rejected')) {
-        throw new Error('Authentication was rejected. Please try again.');
-      } else if (errorMessage.includes('timeout') || errorMessage.includes('network')) {
-        throw new Error('Network error: Unable to connect to the Internet Computer network');
+
+      // Test the actor by calling a simple method
+      try {
+        const status = await agent.status();
+        console.log('[SessionClient] Agent status:', status);
+        
+        // Test the actor with a simple query
+        if (isLocal) {
+          const whoami = await actor.whoami();
+          console.log('[SessionClient] Actor test successful, principal:', whoami.toString());
+        }
+      } catch (testError) {
+        console.error('[SessionClient] Actor test failed:', testError);
+        throw new Error(`Failed to initialize actor: ${formatError(testError)}`);
       }
-      
-      this.actor = null; // Clear actor on error
-      throw error;
+
+      this.actor = actor;
+      this.isInitialized = true;
+      console.log('[SessionClient] Actor initialized successfully');
+      return actor;
+    } catch (error) {
+      console.error('Failed to create actor:', error);
+      this.actor = null;
+      this.isInitialized = false;
+      throw new Error(`Failed to initialize actor: ${formatError(error)}`);
     }
   }
 
-  async createSession(input: CreateSessionInput): Promise<Session> {
+  public async createSession(input: CreateSessionInput): Promise<Session> {
+    console.log('[SessionClient] Creating session with input:', input);
+
+    if (!this.currentIdentity) {
+      const error = 'Must be authenticated to create a session';
+      console.error('[SessionClient]', error);
+      throw new Error(error);
+    }
+
     try {
-      console.log('Creating session with input:', JSON.stringify(input, (_, v) => 
-        typeof v === 'bigint' ? v.toString() : v
-      ));
+      console.log('[SessionClient] Getting actor...');
+      const actor = await this.getActor(true);
+      console.log('[SessionClient] Actor obtained, calling createSession...');
       
-      const actor = await this.getActor();
-      console.log('Actor created successfully');
-      
-      // Prepare the input according to the canister's expected format
-      const sessionInput = {
+      // Convert input to match the expected interface
+      const sessionInput: ICreateSessionInput = {
         title: input.title,
         description: input.description,
         sessionType: input.sessionType,
-        scheduledTime: Number(input.scheduledTime), // Convert BigInt to number
-        duration: BigInt(input.duration),
-        maxAttendees: BigInt(input.maxAttendees),
+        scheduledTime: BigInt(input.scheduledTime.toString()),
+        duration: Number(input.duration),
+        maxAttendees: input.maxAttendees,
+        price: input.price,
         hostName: input.hostName,
-        hostAvatar: input.hostAvatar || '',
-        tags: input.tags || [],
-        ...(input.price !== undefined && { price: BigInt(input.price) })
+        hostAvatar: input.hostAvatar,
+        tags: input.tags
       };
       
-      console.log('Calling createSession with:', sessionInput);
-      console.log('Canister ID:', SESSIONS_CANISTER_ID);
-      
-      const result = await (actor as any).createSession(sessionInput) as { ok?: Session; err?: any };
-      console.log('Raw session creation result:', result);
-      
-      if (result && 'ok' in result && result.ok) {
-        const session = result.ok;
-        // Convert the session to match our frontend's Session type
-        return {
-          ...session,
-          scheduledTime: BigInt(session.scheduledTime),
-          duration: Number(session.duration),
-          maxAttendees: Number(session.maxAttendees),
-          price: session.price ? Number(session.price) : undefined,
-          createdAt: BigInt(session.createdAt),
-          updatedAt: BigInt(session.updatedAt || 0),
-          attendees: session.attendees || [],
-          tags: session.tags || [],
-        };
-      } else {
-        const errorMsg = result?.err ? 
-          (typeof result.err === 'object' ? JSON.stringify(result.err, null, 2) : String(result.err)) :
-          'Unknown error occurred';
-        console.error('Failed to create session:', errorMsg);
-        throw new Error(`Failed to create session: ${errorMsg}`);
-      }
-    } catch (error: unknown) {
-      console.error('Error in createSession:', error);
-      
-      let errorMessage = 'Unknown error';
-      
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
+      // Add optional fields if they exist
+      if (input.recordingUrl) {
+        (sessionInput as any).recordingUrl = input.recordingUrl;
       }
       
-      // Provide more helpful error messages
-      if (errorMessage.includes('403')) {
-        throw new Error('Authentication failed. Please try logging out and back in.');
-      } else if (errorMessage.includes('timed out')) {
-        throw new Error('Request timed out. Please check your internet connection and try again.');
-      }
-      
-      throw new Error(`Failed to create session: ${errorMessage}`);
-    }
-  }
+      console.log('[SessionClient] Calling createSession with:', sessionInput);
+      const response = await actor.createSession(sessionInput);
+      console.log('[SessionClient] Received response:', response);
 
-  async getAllSessions(): Promise<Session[]> {
-    try {
-      // Allow unauthenticated access to fetch all sessions
-      const actor = await this.getActor(false);
-      console.log('Fetching all sessions...');
-      const result = await actor.getAllSessions();
-      
-      if (!Array.isArray(result)) {
-        console.error('Unexpected response format from getAllSessions:', result);
+      if (!response) {
+        throw new Error('No response received from canister');
+      }
+
+      if ('err' in response) {
+        const error = `Failed to create session: ${JSON.stringify(response.err)}`;
+        console.error('[SessionClient]', error);
+        throw new Error(error);
+      }
+
+      if (!('ok' in response) || !response.ok) {
         throw new Error('Invalid response format from canister');
       }
-      
-      // Convert the sessions to match our frontend's Session type
-      return result.map((session: any) => ({
-        ...session,
-        scheduledTime: BigInt(session.scheduledTime || 0),
-        duration: Number(session.duration || 0),
-        maxAttendees: Number(session.maxAttendees || 0),
-        price: session.price !== undefined ? Number(session.price) : undefined,
-        createdAt: BigInt(session.createdAt || 0),
-        updatedAt: BigInt(session.updatedAt || 0),
-        attendees: Array.isArray(session.attendees) ? session.attendees : [],
-        tags: Array.isArray(session.tags) ? session.tags : [],
-        hostName: session.hostName || 'Unknown Host',
-        hostAvatar: session.hostAvatar || '',
-        recordingUrl: session.recordingUrl || undefined,
-        meetingUrl: session.meetingUrl || undefined,
-      }));
+
+      console.log('[SessionClient] Session created successfully:', response.ok);
+      // Type assertion to ensure response.ok is ISession
+      return this.normalizeSession(response.ok as ISession);
     } catch (error) {
-      console.error('Error in getAllSessions:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      throw new Error(`Failed to fetch sessions: ${errorMessage}`);
+      const errorMsg = `Failed to create session: ${formatError(error)}`;
+      console.error('[SessionClient]', errorMsg, error);
+      throw new Error(errorMsg);
     }
   }
 
-  async getMySessions(): Promise<Session[]> {
+  private toNumber(value: any, fieldName: string): number {
+    if (value === undefined || value === null) {
+      throw new Error(`Missing required field: ${fieldName}`);
+    }
+    if (typeof value === 'bigint') {
+      return Number(value);
+    }
+    const num = Number(value);
+    if (isNaN(num)) {
+      throw new Error(`Invalid number format for field ${fieldName}: ${value}`);
+    }
+    return num;
+  }
+  
+  private toString(value: any, fieldName: string): string {
+    if (value === undefined || value === null) {
+      throw new Error(`Missing required field: ${fieldName}`);
+    }
+    return String(value);
+  }
+
+  private normalizeSession(session: ISession): Session {
+    if (!session) {
+      throw new Error('Cannot normalize undefined or null session');
+    }
+
     try {
-      const actor = await this.getActor();
-      console.log('Fetching my sessions...');
-      const result = await actor.getMySessions();
+      console.log('[SessionClient] Normalizing session data:', session);
       
-      if (!Array.isArray(result)) {
-        console.error('Unexpected response format from getMySessions:', result);
-        throw new Error('Invalid response format from canister');
+      // Normalize the session data
+      const normalized: Partial<Session> = {
+        id: this.toString(session.id, 'id'),
+        title: this.toString(session.title, 'title'),
+        description: this.toString(session.description, 'description'),
+        sessionType: this.normalizeSessionType(session.sessionType),
+        scheduledTime: BigInt(session.scheduledTime.toString()),
+        duration: Number(session.duration),
+        maxAttendees: Number(session.maxAttendees),
+        host: this.toString(session.host, 'host'),
+        hostName: this.toString(session.hostName, 'hostName'),
+        hostAvatar: this.toString(session.hostAvatar, 'hostAvatar'),
+        status: this.normalizeSessionStatus(session.status),
+        attendees: Array.isArray(session.attendees) 
+          ? session.attendees.map(a => this.toString(a, 'attendee')) 
+          : [],
+        createdAt: BigInt(session.createdAt.toString()),
+        updatedAt: BigInt(session.updatedAt.toString()),
+        recordingUrl: session.recordingUrl ? this.toString(session.recordingUrl, 'recordingUrl') : null,
+        meetingUrl: session.meetingUrl ? this.toString(session.meetingUrl, 'meetingUrl') : null,
+        tags: Array.isArray(session.tags) 
+          ? session.tags.map(t => this.toString(t, 'tag')).filter(Boolean)
+          : []
+      };
+
+      // Add optional price field if it exists
+      if ('price' in session) {
+        normalized.price = Number(session.price);
       }
-      
-      // Convert the session to match our frontend's Session type
-      return result.map((session: any) => ({
-        ...session,
-        scheduledTime: BigInt(session.scheduledTime || 0),
-        duration: Number(session.duration || 0),
-        maxAttendees: Number(session.maxAttendees || 0),
-        price: session.price !== undefined ? Number(session.price) : undefined,
-        createdAt: BigInt(session.createdAt || 0),
-        updatedAt: BigInt(session.updatedAt || 0),
-        attendees: Array.isArray(session.attendees) ? session.attendees : [],
-        tags: Array.isArray(session.tags) ? session.tags : [],
-        hostName: session.hostName || 'Unknown Host',
-        hostAvatar: session.hostAvatar || '',
-        recordingUrl: session.recordingUrl || undefined,
-        meetingUrl: session.meetingUrl || undefined,
-      }));
+
+      // Add recordSession with a default value
+      normalized.recordSession = false;
+
+      // Assert the type to Session since we've ensured all required fields are present
+      return normalized as Session;
     } catch (error) {
-      console.error('Error in getMySessions:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      throw new Error(`Failed to fetch your sessions: ${errorMessage}`);
+      console.error('[SessionClient] Error normalizing session:', error, session);
+      throw new Error(`Failed to normalize session: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  async getSession(id: string): Promise<Session | null> {
-    if (!id) {
-      console.error('[SessionClient] No session ID provided');
-      throw new Error('Session ID is required');
+  private normalizeSessionStatus(status: any): SessionStatus {
+    if (typeof status === 'object' && status !== null) {
+      if ('scheduled' in status) return { scheduled: null };
+      if ('live' in status) return { live: null };
+      if ('completed' in status) return { completed: null };
+      if ('cancelled' in status) return { cancelled: null };
     }
+    return { scheduled: null };
+  }
 
+  private normalizeSessionType(type: any): SessionType {
+    if (typeof type === 'object' && type !== null) {
+      if ('video' in type) return { video: null };
+      if ('voice' in type) return { voice: null };
+    }
+    return { video: null };
+  }
+
+  public async getSession(sessionId: string): Promise<Session | null> {
     try {
       const actor = await this.getActor(false);
-      const result = await (actor as any).getSession(id) as { ok?: any; err?: any } | null;
+      const result = await actor.getSession(sessionId);
       
-      if (!result || 'err' in result) {
-        console.error('Error fetching session:', result?.err || 'Unknown error');
+      if (!result) {
+        console.warn(`[SessionClient] No result received for session ${sessionId}`);
         return null;
       }
 
-      if (!result.ok) {
-        return null;
-      }
-
-      const session = result.ok;
-      if (!session) return null;
-      
-      // Convert the session to match our frontend's Session type
-      return {
-        id: String(session.id || ''),
-        title: String(session.title || ''),
-        description: String(session.description || ''),
-        sessionType: session.sessionType || { video: null },
-        scheduledTime: BigInt(session.scheduledTime || 0),
-        duration: Number(session.duration || 0),
-        maxAttendees: Number(session.maxAttendees || 0),
-        host: String(session.host || ''),
-        hostName: String(session.hostName || ''),
-        hostAvatar: String(session.hostAvatar || ''),
-        status: session.status || { scheduled: null },
-        attendees: Array.isArray(session.attendees) ? session.attendees.map(String) : [],
-        createdAt: BigInt(session.createdAt || 0),
-        updatedAt: BigInt(session.updatedAt || 0),
-        recordingUrl: session.recordingUrl || null,
-        meetingUrl: session.meetingUrl || null,
-        tags: Array.isArray(session.tags) ? session.tags.map(String) : [],
-        price: session.price !== undefined ? Number(session.price) : undefined,
-      };
+      return this.normalizeSession(result);
     } catch (error) {
-      console.error('Error in getSession:', error);
+      console.error(`[SessionClient] Error getting session ${sessionId}:`, error);
       return null;
     }
   }
 
-  async joinSession(id: string): Promise<Session> {
-    console.log(`[SessionClient] joinSession called with ID: ${id}`);
+  public async getAllSessions(maxRetries = 3, retryDelay = 1000): Promise<Session[]> {
+    let lastError: unknown;
     
-    if (!id) {
-      const error = 'Session ID is required';
-      console.error(`[SessionClient] ${error}`);
-      throw new Error(error);
-    }
-    
-    if (!this.currentIdentity) {
-      const error = 'Authentication required to join a session. Please log in first.';
-      console.error(`[SessionClient] ${error}`);
-      throw new Error(error);
-    }
-    
-    try {
-      console.log('[SessionClient] Getting actor with authentication...');
-      const actor = await this.getActor(true);
-      
-      if (!actor) {
-        throw new Error('Failed to initialize actor with authenticated identity');
-      }
-      
-      console.log('[SessionClient] Using authenticated actor');
-      return await this.attemptJoinSession(actor, id);
-    } catch (error) {
-      console.error('[SessionClient] Error in joinSession:', error);
-      
-      let errorMessage = 'Failed to join session';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
-      }
-      
-      throw new Error(errorMessage);
-    }
-  }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[SessionClient] Fetching sessions (attempt ${attempt}/${maxRetries})`);
+        const actor = await this.getActor(false);
+        const sessions = await actor.getAllSessions();
+        
+        if (!sessions || !Array.isArray(sessions)) {
+          console.warn('[SessionClient] No sessions array received from canister');
+          return [];
+        }
 
-  private async attemptJoinSession(actor: ActorSubclass<_SERVICE>, id: string): Promise<Session> {
-    console.log('[SessionClient] Attempting to join session with actor');
-    
-    if (!this.currentIdentity) {
-      const error = 'No authenticated identity available';
-      console.error(`[SessionClient] ${error}`);
-      throw new Error(error);
-    }
-    
-    const result = await (actor as any).joinSession(id) as { ok?: any; err?: any };
-    console.log('[SessionClient] Received response from canister:', result);
-    
-    if (!result) {
-      throw new Error('No response received from canister');
-    }
-    
-    if ('ok' in result && result.ok) {
-      const session = result.ok;
-      console.log('[SessionClient] Successfully joined session:', session.id);
-      
-      // Process meeting URL to ensure it has authentication parameters
-      let meetingUrl = session.meetingUrl;
-      if (meetingUrl) {
-        try {
-          const url = new URL(meetingUrl);
-          
-          // Add authentication parameters if we have an identity
-          if (this.currentIdentity) {
-            const principal = this.currentIdentity.getPrincipal().toString();
-            
-            // Add JWT-like token with user information
-            const userInfo = {
-              sub: principal,
-              name: '', // Will be set by the frontend
-              email: '', // Will be set by the frontend
-              exp: Math.floor(Date.now() / 1000) + (60 * 60), // 1 hour expiration
-              iat: Math.floor(Date.now() / 1000)
-            };
-            
-            const authToken = btoa(JSON.stringify(userInfo));
-            url.searchParams.append('jwt', authToken);
-            
-            // Add security parameters
-            const params = {
-              'config.prejoinPageEnabled': 'false',
-              'interfaceConfig.DISABLE_JOIN_LEAVE_NOTIFICATIONS': 'true',
-              'config.startWithAudioMuted': 'false',
-              'config.startWithVideoMuted': 'false',
-              'config.disableRemoteMute': 'true',
-              'config.requireDisplayName': 'true',
-              'config.enableNoisyMicDetection': 'false',
-              'config.enableClosePage': 'true',
-              'config.disableInviteFunctions': 'true',
-              'config.enableWelcomePage': 'false',
-              'config.enableUserRolesBasedOnToken': 'true'
-            };
-            
-            // Add all parameters to URL
-            Object.entries(params).forEach(([key, value]) => {
-              if (!url.searchParams.has(key)) {
-                url.searchParams.append(key, value);
-              }
-            });
-            
-            meetingUrl = url.toString();
-            console.log('[SessionClient] Updated meeting URL with auth parameters');
-          }
-        } catch (error) {
-          console.warn('[SessionClient] Failed to process meeting URL:', error);
+        return sessions.map(session => this.normalizeSession(session));
+      } catch (error) {
+        lastError = error;
+        console.warn(`[SessionClient] Attempt ${attempt} failed:`, error);
+        
+        if (attempt < maxRetries) {
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
         }
       }
-      
-      // Convert the session to match our frontend's Session type
-      return {
-        id: String(session.id || ''),
-        title: String(session.title || ''),
-        description: String(session.description || ''),
-        sessionType: session.sessionType || { video: null },
-        scheduledTime: BigInt(session.scheduledTime || 0),
-        duration: Number(session.duration || 0),
-        maxAttendees: Number(session.maxAttendees || 0),
-        price: session.price !== undefined ? Number(session.price) : undefined,
-        host: String(session.host?.toString() || ''),
-        hostName: String(session.hostName || ''),
-        hostAvatar: String(session.hostAvatar || ''),
-        status: session.status || { scheduled: null },
-        attendees: Array.isArray(session.attendees) 
-          ? session.attendees.map((p: any) => typeof p === 'object' && 'toString' in p ? p.toString() : String(p))
-          : [],
-        createdAt: BigInt(session.createdAt || 0),
-        updatedAt: BigInt(session.updatedAt || 0),
-        recordingUrl: session.recordingUrl || null,
-        meetingUrl: meetingUrl || session.meetingUrl || null,
-        tags: Array.isArray(session.tags) ? session.tags.map(String) : []
-      };
-    } else {
-      const errorMessage = result?.err ? 
-        (typeof result.err === 'object' ? JSON.stringify(result.err) : String(result.err)) :
-        'Unknown error occurred while joining session';
-      
-      console.error('[SessionClient] Error joining session:', errorMessage);
-      throw new Error(errorMessage);
     }
-  }
-
-  async updateSessionStatus(id: string, status: Session["status"]): Promise<Session> {
-    const actor = await this.getActor()
-    const updateInput = {
-      id,
-      title: [],
-      description: [],
-      scheduledTime: [],
-      duration: [],
-      maxAttendees: [],
-      status: [status],
-      recordingUrl: [],
-      meetingUrl: [],
-    }
-    const result = await (actor as any).updateSession(updateInput) as { ok?: Session; err?: any }
     
-    if (result && 'ok' in result) {
-      return result.ok as Session;
-    } else {
-      const errorMessage = result?.err?.toString() || 'Failed to update session status';
-      throw new Error(errorMessage);
-    }
+    console.error('[SessionClient] All attempts to fetch sessions failed');
+    throw new Error(`Failed to get sessions after ${maxRetries} attempts: ${formatError(lastError)}`);
   }
 
-  async deleteSession(id: string): Promise<boolean> {
-    const actor = await this.getActor()
-    const result = await (actor as any).deleteSession(id) as { ok?: boolean; err?: any }
-    
-    if (result && 'ok' in result) {
-      return result.ok as boolean;
-    } else {
-      const errorMessage = result?.err?.toString() || 'Failed to delete session';
-      throw new Error(errorMessage);
+  public async updateSession(sessionId: string, updates: Partial<CreateSessionInput>): Promise<Session> {
+    if (!this.currentIdentity) {
+      throw new Error('Must be authenticated to update a session');
     }
-  }
 
-  async searchSessions(query: string): Promise<Session[]> {
     try {
-      const actor = await this.getActor();
-      const result = await (actor as any).searchSessions(query) as Session[] | { err?: any };
+      const updateData: Partial<ICreateSessionInput> = {};
       
-      if (Array.isArray(result)) {
-        return result;
-      } else if (result && 'err' in result) {
-        throw new Error(result.err?.toString() || 'Failed to search sessions');
+      // Only include defined values in the update
+      if (updates.title !== undefined) updateData.title = updates.title;
+      if (updates.description !== undefined) updateData.description = updates.description;
+      if (updates.sessionType !== undefined) updateData.sessionType = updates.sessionType;
+      if (updates.scheduledTime !== undefined) {
+        updateData.scheduledTime = BigInt(updates.scheduledTime.toString());
       }
-      return [];
+      if (updates.duration !== undefined) updateData.duration = Number(updates.duration);
+      if (updates.maxAttendees !== undefined) updateData.maxAttendees = updates.maxAttendees;
+      if (updates.price !== undefined) {
+        updateData.price = updates.price !== undefined ? updates.price : undefined;
+      }
+      if (updates.recordingUrl !== undefined) {
+        (updateData as any).recordingUrl = updates.recordingUrl;
+      }
+      if (updates.tags !== undefined) updateData.tags = updates.tags;
+      
+      const actor = await this.getActor(true);
+      const result = await (actor as any).updateSession(sessionId, updateData);
+
+      if (!result) {
+        throw new Error('No response received from canister');
+      }
+
+      if ('err' in result) {
+        throw new Error(`Failed to update session: ${JSON.stringify(result.err)}`);
+      }
+
+      if (!('ok' in result)) {
+        throw new Error('Invalid response format from canister');
+      }
+
+      return this.normalizeSession(result.ok);
     } catch (error) {
-      console.error('Error in searchSessions:', error);
-      throw error;
+      console.error(`[SessionClient] Error updating session ${sessionId}:`, error);
+      throw new Error(`Failed to update session: ${formatError(error)}`);
     }
   }
 
-  async getCompletedSessions(): Promise<Session[]> {
+  public async deleteSession(sessionId: string): Promise<boolean> {
+    if (!this.currentIdentity) {
+      throw new Error('Must be authenticated to delete a session');
+    }
+
     try {
-      const actor = await this.getActor();
-      const result = await (actor as any).getSessionsByStatus({ completed: null }) as Session[] | { err?: any };
+      const actor = await this.getActor(true);
+      const result = await (actor as any).deleteSession(sessionId);
       
-      if (Array.isArray(result)) {
-        return result;
-      } else if (result && 'err' in result) {
-        throw new Error(result.err?.toString() || 'Failed to get completed sessions');
+      if (!result) {
+        throw new Error('No response received from canister');
       }
-      return [];
+      
+      if ('err' in result) {
+        throw new Error(`Failed to delete session: ${JSON.stringify(result.err)}`);
+      }
+      
+      return result.ok === true;
     } catch (error) {
-      console.error('Error in getCompletedSessions:', error);
-      throw error;
+      console.error(`[SessionClient] Error deleting session ${sessionId}:`, error);
+      throw new Error(`Failed to delete session: ${formatError(error)}`);
     }
   }
 
+  public async joinSession(sessionId: string): Promise<Session> {
+    if (!this.currentIdentity) {
+      throw new Error('Must be authenticated to join a session');
+    }
+
+    try {
+      const actor = await this.getActor(true);
+      const result = await (actor as any).joinSession(sessionId);
+      
+      if (!result || !('ok' in result) || !result.ok) {
+        throw new Error('Failed to join session');
+      }
+
+      return this.normalizeSession(result.ok);
+    } catch (error) {
+      console.error(`[SessionClient] Error joining session ${sessionId}:`, error);
+      throw new Error(`Failed to join session: ${formatError(error)}`);
+    }
+  }
+
+  public async leaveSession(sessionId: string): Promise<Session> {
+    if (!this.currentIdentity) {
+      throw new Error('Must be authenticated to leave a session');
+    }
+
+    try {
+      const actor = await this.getActor(true);
+      const result = await (actor as any).leaveSession(sessionId);
+      
+      if (!result || !('ok' in result) || !result.ok) {
+        throw new Error('Failed to leave session');
+      }
+
+      return this.normalizeSession(result.ok);
+    } catch (error) {
+      console.error(`[SessionClient] Error leaving session ${sessionId}:`, error);
+      throw new Error(`Failed to leave session: ${formatError(error)}`);
+    }
+  }
+
+  public async updateSessionStatus(
+    sessionId: string, 
+    status: SessionStatus
+  ): Promise<Session> {
+    if (!this.currentIdentity) {
+      throw new Error('Must be authenticated to update session status');
+    }
+
+    try {
+      // Convert the status to a format the canister expects
+      let statusUpdate: any;
+      if ('scheduled' in status) statusUpdate = { scheduled: null };
+      else if ('live' in status) statusUpdate = { live: null };
+      else if ('completed' in status) statusUpdate = { completed: null };
+      else if ('cancelled' in status) statusUpdate = { cancelled: null };
+      else throw new Error('Invalid session status');
+
+      const actor = await this.getActor(true);
+      const result = await (actor as any).updateSessionStatus(sessionId, statusUpdate);
+      
+      if (!result) {
+        throw new Error('No response received from canister');
+      }
+      
+      if ('err' in result) {
+        throw new Error(`Failed to update session status: ${JSON.stringify(result.err)}`);
+      }
+      
+      if (!('ok' in result) || !result.ok) {
+        throw new Error('Invalid response format from canister');
+      }
+
+      return this.normalizeSession(result.ok);
+    } catch (error) {
+      console.error(`[SessionClient] Error updating status for session ${sessionId}:`, error);
+      throw new Error(`Failed to update session status: ${formatError(error)}`);
+    }
+  }
 }
 
-export const sessionClient = new SessionClient();
+// Create and export a singleton instance
+export const sessionClient = SessionClient.getInstance();
 
-// Test method to verify canister connectivity
-export async function testCanisterConnection(): Promise<boolean> {
-  try {
-    console.log('Testing canister connection...');
-    const actor = await sessionClient.getActor(false);
-    console.log('Successfully created actor');
-    
-    // Try to call a simple method
-    const actorAny = actor as any;
-    if (typeof actorAny.canister_id === 'function') {
-      try {
-        const canisterId = await actorAny.canister_id();
-        console.log('Canister ID from actor:', canisterId);
-        return true;
-      } catch (error) {
-        console.warn('Could not call canister_id method, trying another approach...');
-      }
-    }
-    
-    // If canister_id doesn't exist, try another method
-    if (typeof actorAny.status === 'function') {
-      try {
-        const status = await actorAny.status();
-        console.log('Canister status:', status);
-        return true;
-      } catch (statusError) {
-        console.error('Failed to get canister status:', statusError);
-      }
-    }
-    
-    // If we get here, no methods worked
-    console.warn('No standard canister methods available for testing connection');
-    return false;
-  } catch (error) {
-    console.error('Failed to create actor:', error);
-    return false;
-  }
-}
-
-// Test the connection when this module is loaded
-if (typeof window !== 'undefined') {
-  testCanisterConnection().then(success => {
-    console.log(`Canister connection test ${success ? 'succeeded' : 'failed'}`);
-  });
+// Expose on window for debugging in development
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  (window as any).sessionClient = sessionClient;
 }

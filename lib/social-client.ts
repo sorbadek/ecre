@@ -103,7 +103,7 @@ class SocialClient {
           // Handle both string URLs and Request objects
           const url = new URL(
             input instanceof Request ? input.url : input.toString(),
-            typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+            typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:4943'
           );
           
           // Fix double API version in path if it exists
@@ -113,7 +113,7 @@ class SocialClient {
           
           const isICApiCall = url.pathname.includes('/api/v2/');
           const isLocal = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
-          const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+          const origin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:4943';
           
           // Prepare request headers
           const requestHeaders = new Headers(init?.headers);

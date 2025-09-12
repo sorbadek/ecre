@@ -1,47 +1,42 @@
 {
   "version": 1,
   "canisters": {
-    "user_profile": {
-      "type": "motoko",
-      "main": "user-profile/main.mo",
-      "local": "b77ix-eeaaa-aaaaa-qaada-cai"
-    },
     "learning_analytics": {
       "type": "motoko",
-      "main": "learning-analytics/main.mo",
-      "local": "bkyz2-fmaaa-aaaaa-qaaaq-cai"
+      "main": "learning-analytics/main.mo"
     },
+    "user_profile": {
+      "type": "motoko",
+      "main": "user-profile/main.mo"
+    },
+    
     "notifications": {
       "type": "motoko",
-      "main": "notifications/main.mo",
-      "local": "bd3sg-teaaa-aaaaa-qaaba-cai"
+      "main": "notifications/main.mo"
     },
     "social": {
       "type": "motoko",
-      "main": "social/main.mo",
-      "local": "bw4dl-smaaa-aaaaa-qaacq-cai"
+      "main": "social/main.mo"
     },
     "recommendations": {
       "type": "motoko",
-      "main": "recommendations/main.mo",
-      "local": "be2us-64aaa-aaaaa-qaabq-cai"
+      "main": "recommendations/main.mo"
     },
     "sessions": {
       "type": "motoko",
-      "main": "sessions/main.mo",
-      "local": "br5f7-7uaaa-aaaaa-qaaca-cai"
-    },
-    "peerverse_frontend": {
-      "type": "assets",
-      "source": ["../dist"]
+      "main": "sessions/main.mo"
     }
   },
   "networks": {
-    "local": {
-      "bind": "127.0.0.1:4943",
-      "type": "ephemeral",
-      "wallet": "lqy7q-dh777-77777-aaaaq-cai"
-    },
+  "local": {
+    "bind": "127.0.0.1:4943",
+    "type": "ephemeral",
+    "cors": {
+      "allowed_origins": ["*"],
+      "allowed_methods": ["*"],
+      "allowed_headers": ["*"]
+    }
+  },
     "ic": {
       "providers": ["https://ic0.app"],
       "type": "persistent"

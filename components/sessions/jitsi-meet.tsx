@@ -122,71 +122,139 @@ const JitsiMeet: React.FC<JitsiMeetProps> = ({
 
   // Initialize Jitsi Meet
   useEffect(() => {
-    if (!isJitsiLoaded || !jitsiContainerRef.current || !isAuthenticated) return;
+    if (!isJitsiLoaded || !jitsiContainerRef.current || !isAuthenticated) {
+      console.log('Jitsi not loaded or container not ready:', { isJitsiLoaded, container: jitsiContainerRef.current, isAuthenticated });
+      return;
+    }
 
-    const domain = 'meet.jit.si';
-    const options = {
-      roomName: session.jitsiRoomName,
-      width: '100%',
-      height: '100%',
-      parentNode: jitsiContainerRef.current,
-      configOverwrite: {
-        prejoinPageEnabled: false,
-        startWithAudioMuted: session.jitsiConfig.startWithAudioMuted,
-        startWithVideoMuted: session.jitsiConfig.startWithVideoMuted,
-        disableRemoteMute: false,
-        requireDisplayName: true,
-        enableNoisyMicDetection: true,
-        enableClosePage: true,
-        disableInviteFunctions: false,
-        enableWelcomePage: false,
-        enableUserRolesBasedOnToken: true,
-        fileRecordingsEnabled: session.jitsiConfig.enableRecording,
-        desktopSharingFrameRate: {
-          min: 5,
-          max: 30
+    console.log('Initializing Jitsi Meet with session:', session);
+
+    try {
+      const domain = 'meet.jit.si';
+      const roomName = session.jitsiRoomName || `peer-${session.id}-${Date.now()}`;
+      
+      console.log('Creating Jitsi room:', roomName);
+      
+      const options = {
+        roomName: roomName,
+        width: '100%',
+        height: '100%',
+        parentNode: jitsiContainerRef.current,
+        configOverwrite: {
+          prejoinPageEnabled: false,
+          startWithAudioMuted: session.jitsiConfig?.startWithAudioMuted ?? false,
+          startWithVideoMuted: session.jitsiConfig?.startWithVideoMuted ?? false,
+          disableRemoteMute: false,
+          requireDisplayName: true,
+          enableNoisyMicDetection: true,
+          enableClosePage: true,
+          disableInviteFunctions: false,
+          enableWelcomePage: false,
+          enableUserRolesBasedOnToken: true,
+          fileRecordingsEnabled: session.jitsiConfig?.enableRecording ?? false,
+          desktopSharingFrameRate: {
+            min: 5,
+            max: 30
+          },
+          maxParticipants: session.jitsiConfig?.maxParticipants ? Number(session.jitsiConfig.maxParticipants) : 20,
+          startSilent: false,
+          enableNoAudioDetection: true,
+          resolution: 720,
+          constraints: {
+            video: {
+              height: {
+                ideal: 720,
+                max: 720,
+                min: 240
+              }
+            }
+          },
         },
-        maxParticipants: session.jitsiConfig.maxParticipants ? Number(session.jitsiConfig.maxParticipants) : undefined,
-      },
-      interfaceConfigOverwrite: {
-        DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
-        SHOW_JITSI_WATERMARK: false,
-        SHOW_WATERMARK_FOR_GUESTS: false,
-        TOOLBAR_BUTTONS: [
-          'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
-          'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
-          'livestreaming', 'etherpad', 'sharedvideo', 'settings', 'raisehand',
-          'videoquality', 'filmstrip', 'invite', 'feedback', 'stats', 'shortcuts',
-          'tileview', 'videobackgroundblur', 'download', 'help', 'mute-everyone',
-          'security'
-        ],
-      },
-      userInfo: {
-        displayName: session.jitsiConfig.displayName,
-        email: session.jitsiConfig.email || undefined,
+        interfaceConfigOverwrite: {
+          DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+          SHOW_JITSI_WATERMARK: false,
+          SHOW_WATERMARK_FOR_GUESTS: false,
+          SHOW_CHROME_EXTENSION_BANNER: false,
+          MOBILE_APP_PROMO: false,
+          HIDE_INVITE_MORE_HEADER: false,
+          DISABLE_VIDEO_BACKGROUND: false,
+          DISABLE_PRESENCE_STATUS: false,
+          ENABLE_DIAL_OUT: false,
+          ENABLE_DIAL_IN: false,
+          TOOLBAR_BUTTONS: [
+            'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
+            'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
+            'livestreaming', 'settings', 'raisehand', 'videoquality', 'filmstrip',
+            'invite', 'feedback', 'stats', 'shortcuts', 'tileview', 'help'
+          ],
+        },
+        userInfo: {
+          displayName: session.jitsiConfig?.displayName || 'Anonymous',
+          email: session.jitsiConfig?.email || undefined,
+        },
+        onload: () => {
+          console.log('Jitsi Meet API loaded');
+        }
+      };
+
+      console.log('Jitsi options:', options);
+
+      const api = new window.JitsiMeetExternalAPI(domain, options);
+      jitsiApiRef.current = api;
+
+      // Event listeners
+      api.addEventListeners({
+        videoConferenceJoined: handleConferenceJoined,
+        videoConferenceLeft: handleConferenceLeft,
+        participantJoined: handleParticipantJoined,
+        participantLeft: handleParticipantLeft,
+        audioMuteStatusChanged: handleAudioMuteStatusChanged,
+        videoMuteStatusChanged: handleVideoMuteStatusChanged,
+        screenSharingStatusChanged: handleScreenSharingStatusChanged,
+        recordingStatusChanged: handleRecordingStatusChanged,
+        chatUpdated: handleChatUpdated,
+        readyToClose: () => {
+          console.log('Jitsi is ready to close');
+          if (onLeave) {
+            onLeave();
+          }
+        },
+        error: (error: any) => {
+          console.error('Jitsi error:', error);
+          toast.error(`Jitsi error: ${error?.message || 'Unknown error'}`);
+        },
+        connectionEstablished: () => {
+          console.log('Jitsi connection established');
+          setIsConnected(true);
+        },
+        connectionFailed: (error: any) => {
+          console.error('Jitsi connection failed:', error);
+          toast.error('Failed to connect to Jitsi. Please check your internet connection.');
+          setIsConnected(false);
+        },
+      });
+
+      // Set up recording if enabled
+      if (session.jitsiConfig?.enableRecording) {
+        console.log('Setting up recording...');
+        // Set up recording configuration here
       }
-    };
 
-    const api = new window.JitsiMeetExternalAPI(domain, options);
-    jitsiApiRef.current = api;
-
-    // Event listeners
-    api.addEventListener('videoConferenceJoined', handleConferenceJoined);
-    api.addEventListener('videoConferenceLeft', handleConferenceLeft);
-    api.addEventListener('participantJoined', handleParticipantJoined);
-    api.addEventListener('participantLeft', handleParticipantLeft);
-    api.addEventListener('audioMuteStatusChanged', handleAudioMuteStatusChanged);
-    api.addEventListener('videoMuteStatusChanged', handleVideoMuteStatusChanged);
-    api.addEventListener('screenSharingStatusChanged', handleScreenSharingStatusChanged);
-    api.addEventListener('recordingStatusChanged', handleRecordingStatusChanged);
-    api.addEventListener('chatUpdated', handleChatUpdated);
-
-    return () => {
-      if (api) {
-        api.dispose();
-      }
-    };
-  }, [isJitsiLoaded, isAuthenticated]);
+      return () => {
+        console.log('Cleaning up Jitsi instance');
+        if (api) {
+          try {
+            api.dispose();
+          } catch (e) {
+            console.error('Error disposing Jitsi:', e);
+          }
+        }
+      };
+    } catch (error) {
+      console.error('Error initializing Jitsi:', error);
+      toast.error('Failed to initialize Jitsi Meet. Please try again.');
+    }
+  }, [isJitsiLoaded, isAuthenticated, session]);
 
   // Recording timer
   useEffect(() => {

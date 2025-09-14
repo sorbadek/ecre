@@ -1,6 +1,6 @@
 import { getIdentity, createActor, RECOMMENDATIONS_CANISTER_ID } from "./ic/agent"
 import { idlFactory } from "./ic/recommendations.idl"
-import type { _SERVICE as RecommendationsService } from "./ic/recommendations.idl"
+// Remove the _SERVICE import since it's not exported from the IDL file
 import { Principal } from "@dfinity/principal"
 
 export type ContentType = 'course' | 'article' | 'video' | 'book' | 'tutorial' | 'workshop'
@@ -30,11 +30,11 @@ export async function getRecommendations(limit: number = 10): Promise<Recommenda
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
   
-  const actor = await createActor<RecommendationsService>(
-    RECOMMENDATIONS_CANISTER_ID,
+  const actor = await createActor({
+    canisterId: RECOMMENDATIONS_CANISTER_ID,
     idlFactory,
     identity
-  )
+  }) as any
   
   const result = await actor.getRecommendations(BigInt(limit))
   
@@ -60,11 +60,11 @@ export async function markAsViewed(id: string): Promise<void> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
   
-  const actor = await createActor<RecommendationsService>(
-    RECOMMENDATIONS_CANISTER_ID,
+  const actor = await createActor({
+    canisterId: RECOMMENDATIONS_CANISTER_ID,
     idlFactory,
     identity
-  )
+  }) as any
   
   await actor.markAsViewed(Principal.fromText(id))
 }
@@ -73,11 +73,11 @@ export async function markAsClicked(id: string): Promise<void> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
   
-  const actor = await createActor<RecommendationsService>(
-    RECOMMENDATIONS_CANISTER_ID,
+  const actor = await createActor({
+    canisterId: RECOMMENDATIONS_CANISTER_ID,
     idlFactory,
     identity
-  )
+  }) as any
   
   await actor.markAsClicked(Principal.fromText(id))
 }
@@ -86,11 +86,11 @@ export async function markAsCompleted(id: string): Promise<void> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
   
-  const actor = await createActor<RecommendationsService>(
-    RECOMMENDATIONS_CANISTER_ID,
+  const actor = await createActor({
+    canisterId: RECOMMENDATIONS_CANISTER_ID,
     idlFactory,
     identity
-  )
+  }) as any
   
   await actor.markAsCompleted(Principal.fromText(id))
 }
@@ -99,11 +99,11 @@ export async function saveRecommendation(id: string): Promise<void> {
   const identity = await getIdentity()
   if (!identity) throw new Error("Not authenticated")
   
-  const actor = await createActor<RecommendationsService>(
-    RECOMMENDATIONS_CANISTER_ID,
+  const actor = await createActor({
+    canisterId: RECOMMENDATIONS_CANISTER_ID,
     idlFactory,
     identity
-  )
+  }) as any
   
   await actor.saveRecommendation(Principal.fromText(id))
 }

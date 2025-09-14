@@ -11,6 +11,20 @@ export const idlFactory = ({ IDL }: any) => {
     cancelled: IDL.Null,
   })
 
+  const JitsiConfig = IDL.Record({
+    roomName: IDL.Text,
+    displayName: IDL.Text,
+    email: IDL.Opt(IDL.Text),
+    avatarUrl: IDL.Opt(IDL.Text),
+    moderator: IDL.Bool,
+    startWithAudioMuted: IDL.Bool,
+    startWithVideoMuted: IDL.Bool,
+    enableRecording: IDL.Bool,
+    enableScreenSharing: IDL.Bool,
+    enableChat: IDL.Bool,
+    maxParticipants: IDL.Opt(IDL.Nat),
+  })
+
   const CreateSessionInput = IDL.Record({
     title: IDL.Text,
     description: IDL.Text,
@@ -21,6 +35,8 @@ export const idlFactory = ({ IDL }: any) => {
     hostName: IDL.Text,
     hostAvatar: IDL.Text,
     tags: IDL.Vec(IDL.Text),
+    isRecordingEnabled: IDL.Bool,
+    jitsiConfig: IDL.Opt(JitsiConfig),
   })
 
   const Session = IDL.Record({
@@ -39,6 +55,8 @@ export const idlFactory = ({ IDL }: any) => {
     createdAt: IDL.Int,
     recordingUrl: IDL.Opt(IDL.Text),
     meetingUrl: IDL.Opt(IDL.Text),
+    isRecordingEnabled: IDL.Bool,
+    jitsiConfig: IDL.Opt(JitsiConfig),
   })
 
   const Result = IDL.Variant({ ok: Session, err: IDL.Text })

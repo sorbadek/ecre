@@ -2,7 +2,7 @@ import { Actor, HttpAgent, Identity, ActorSubclass, ActorMethod } from "@dfinity
 import { Principal } from "@dfinity/principal";
 import { AuthClient } from "@dfinity/auth-client";
 import { idlFactory } from "./ic/sessions.idl";
-import { _SERVICE, Session as ISession, CreateSessionInput as ICreateSessionInput, SessionStatus as ISessionStatus } from "./ic/sessions";
+import { _SERVICE, Session as ISession, CreateSessionInput as ICreateSessionInput, SessionStatus as ISessionStatus, JitsiConfig } from "./ic/sessions";
 
 // Extend the _SERVICE interface to match our needs
 type SessionService = _SERVICE & {
@@ -22,13 +22,13 @@ type SessionService = _SERVICE & {
 
 // Constants
 // Get canister ID from environment variable or use default
-const DEFAULT_SESSIONS_CANISTER_ID = "br5f7-7uaaa-aaaaa-qaaca-cai";
+const DEFAULT_SESSIONS_CANISTER_ID = "e6lpp-6iaaa-aaaaa-qajnq-cai";
 const SESSIONS_CANISTER_ID = process.env.NEXT_PUBLIC_SESSIONS_CANISTER_ID || DEFAULT_SESSIONS_CANISTER_ID;
 
 // Use the IC replica directly
-const LOCAL_HOST = 'http://127.0.0.1:4943';
-const CANDID_INTERFACE = "by6od-j4aaa-aaaaa-qaadq-cai";
-const PRODUCTION_HOST = "https://ic0.app";
+const LOCAL_HOST = 'https://a4gq6-oaaaa-aaaab-qaa4q-cai.icp0.io';
+const CANDID_INTERFACE = "e6lpp-6iaaa-aaaaa-qajnq-cai";
+const PRODUCTION_HOST = "https://a4gq6-oaaaa-aaaab-qaa4q-cai.icp0.io";
 
 // API proxy endpoint
 const API_PROXY_ENDPOINT = "/api/ic-proxy";
@@ -42,13 +42,11 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// Determine if we're in local development
-const isLocal = process.env.NODE_ENV !== 'production' || 
-  (typeof window !== 'undefined' && 
-   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
+// Force production mode to use the IC network
+const isLocal = false;
 
 // Configure host based on environment
-const HOST = isLocal ? LOCAL_HOST : PRODUCTION_HOST;
+const HOST = PRODUCTION_HOST;
 
 // Log environment info
 console.log(`[SessionClient] Initialized in ${isLocal ? 'local' : 'production'} mode`);
@@ -103,6 +101,7 @@ export interface CreateSessionInput {
   hostAvatar: string;
   tags: string[];
   recordSession: boolean;
+  isRecordingEnabled: boolean;
   recordingUrl?: string | null;
 }
 
@@ -127,6 +126,15 @@ export interface Session {
   tags: string[];
   recordSession: boolean;
   err?: any;
+  // Additional properties expected by components
+  recordingInfo?: any;
+  jitsiRoomName?: string;
+  jitsiConfig?: any;
+  isRecordingEnabled?: boolean;
+  participantCount?: number;
+  actualEndTime?: bigint;
+  actualStartTime?: bigint;
+  maxParticipants?: number;
 }
 
 // Declare global type for window.sessionClient
@@ -184,56 +192,11 @@ export class SessionClient {
       console.log(`[SessionClient] Creating new agent for ${isLocal ? 'local' : 'production'} environment`);
       
       const agent = new HttpAgent({
-        // For local development, we'll use the proxy instead of setting the host
-        host: isLocal ? undefined : PRODUCTION_HOST,
+        host: PRODUCTION_HOST,
         identity: this.currentIdentity || undefined,
       });
 
-      if (isLocal) {
-        console.log('[SessionClient] Setting up proxy for local development');
-        
-        // Create a custom fetch function that uses our proxy
-        const customFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-          const requestUrl = new URL(input.toString());
-          
-          // Only proxy requests to the IC replica
-          if (requestUrl.hostname === '127.0.0.1' || requestUrl.hostname === 'localhost') {
-            // Use the direct IC replica URL instead of proxying
-            const directUrl = new URL(requestUrl.toString());
-            directUrl.hostname = '127.0.0.1';
-            directUrl.port = '4943';
-            
-            // Prepare headers for the direct request
-            const headers = new Headers(init?.headers);
-            headers.set('Origin', 'http://127.0.0.1:4943');
-            
-            console.log(`[SessionClient] Sending direct request to IC replica: ${directUrl.toString()}`);
-            
-            return fetch(directUrl.toString(), {
-              ...init,
-              headers,
-              mode: 'cors',
-              credentials: 'include',
-            });
-          }
-          
-          // For non-IC requests, use the regular fetch
-          return fetch(input, init);
-        };
-        
-        // @ts-ignore - Override the agent's fetch method
-        agent.fetch = customFetch;
-        
-        // Fetch root key for local development
-        console.log('[SessionClient] Fetching root key for local development');
-        try {
-          await fetchRootKey(agent);
-        } catch (error) {
-          console.warn('[SessionClient] Could not fetch root key, continuing without it:', error);
-        }
-      } else {
-        console.log('[SessionClient] Running in production mode');
-      }
+      console.log('[SessionClient] Running in production mode');
 
       // Create a new actor with the correct type
       console.log('[SessionClient] Creating actor with canister ID:', SESSIONS_CANISTER_ID);
@@ -247,23 +210,21 @@ export class SessionClient {
         const status = await agent.status();
         console.log('[SessionClient] Agent status:', status);
         
-        // Test the actor with a simple query if in local development
-        if (isLocal) {
-          try {
-            // Check if the actor has the whoami method before calling it
-            if (typeof actor.whoami === 'function') {
-              const whoami = await actor.whoami();
-              console.log('[SessionClient] Actor test successful, principal:', whoami.toString());
-            } else {
-              console.log('[SessionClient] whoami method not available, skipping test');
-              // Try a different method that should be available
-              const sessions = await actor.getAllSessions().catch(() => []);
-              console.log(`[SessionClient] Successfully fetched ${sessions.length} sessions`);
-            }
-          } catch (testError) {
-            console.warn('[SessionClient] Actor test warning:', testError);
-            // Continue initialization even if test fails
+        // Test the actor with a simple query in production
+        try {
+          // Check if the actor has the whoami method before calling it
+          if (typeof actor.whoami === 'function') {
+            const whoami = await actor.whoami();
+            console.log('[SessionClient] Actor test successful, principal:', whoami.toString());
+          } else {
+            console.log('[SessionClient] whoami method not available, skipping test');
+            // Try a different method that should be available
+            const sessions = await actor.getAllSessions().catch(() => []);
+            console.log(`[SessionClient] Successfully fetched ${sessions.length} sessions`);
           }
+        } catch (testError) {
+          console.warn('[SessionClient] Actor test warning:', testError);
+          // Continue initialization even if test fails
         }
       } catch (error) {
         console.error('[SessionClient] Error during actor initialization:', error);
@@ -296,24 +257,20 @@ export class SessionClient {
       const actor = await this.getActor(true);
       console.log('[SessionClient] Actor obtained, calling createSession...');
       
-      // Convert input to match the expected interface
+      // Create session input matching exact Motoko field order
       const sessionInput: ICreateSessionInput = {
-        title: input.title,
-        description: input.description,
+        title: String(input.title),
+        description: String(input.description),
         sessionType: input.sessionType,
-        scheduledTime: BigInt(input.scheduledTime.toString()),
-        duration: Number(input.duration),
-        maxAttendees: input.maxAttendees,
-        price: input.price,
-        hostName: input.hostName,
-        hostAvatar: input.hostAvatar,
-        tags: input.tags
+        scheduledTime: BigInt(input.scheduledTime),
+        duration: BigInt(input.duration), // Use BigInt for Nat type
+        maxAttendees: BigInt(input.maxAttendees), // Use BigInt for Nat type
+        hostName: String(input.hostName),
+        hostAvatar: String(input.hostAvatar),
+        tags: input.tags.map(tag => String(tag)),
+        isRecordingEnabled: Boolean(input.isRecordingEnabled || false),
+        jitsiConfig: [] as [] | [any]
       };
-      
-      // Add optional fields if they exist
-      if (input.recordingUrl) {
-        (sessionInput as any).recordingUrl = input.recordingUrl;
-      }
       
       console.log('[SessionClient] Calling createSession with:', sessionInput);
       const response = await actor.createSession(sessionInput);
@@ -372,38 +329,40 @@ export class SessionClient {
     try {
       console.log('[SessionClient] Normalizing session data:', session);
       
-      // Normalize the session data
+      // Normalize the session data with safe field access
       const normalized: Partial<Session> = {
         id: this.toString(session.id, 'id'),
         title: this.toString(session.title, 'title'),
         description: this.toString(session.description, 'description'),
         sessionType: this.normalizeSessionType(session.sessionType),
-        scheduledTime: BigInt(session.scheduledTime.toString()),
-        duration: Number(session.duration),
-        maxAttendees: Number(session.maxAttendees),
-        host: this.toString(session.host, 'host'),
-        hostName: this.toString(session.hostName, 'hostName'),
-        hostAvatar: this.toString(session.hostAvatar, 'hostAvatar'),
+        scheduledTime: BigInt(session.scheduledTime?.toString() || '0'),
+        duration: Number(session.duration || 0),
+        maxAttendees: Number(session.maxAttendees || 0),
+        host: session.host ? this.toString(session.host, 'host') : '',
+        hostName: session.hostName ? this.toString(session.hostName, 'hostName') : '',
+        hostAvatar: session.hostAvatar ? this.toString(session.hostAvatar, 'hostAvatar') : '',
         status: this.normalizeSessionStatus(session.status),
         attendees: Array.isArray(session.attendees) 
-          ? session.attendees.map(a => this.toString(a, 'attendee')) 
+          ? session.attendees.map(a => a ? this.toString(a, 'attendee') : '').filter(Boolean)
           : [],
-        createdAt: BigInt(session.createdAt.toString()),
-        updatedAt: BigInt(session.updatedAt.toString()),
+        createdAt: BigInt(session.createdAt?.toString() || Date.now().toString() + '000000'),
+        updatedAt: session.updatedAt ? BigInt(session.updatedAt.toString()) : BigInt(Date.now() * 1_000_000),
         recordingUrl: session.recordingUrl ? this.toString(session.recordingUrl, 'recordingUrl') : null,
         meetingUrl: session.meetingUrl ? this.toString(session.meetingUrl, 'meetingUrl') : null,
         tags: Array.isArray(session.tags) 
-          ? session.tags.map(t => this.toString(t, 'tag')).filter(Boolean)
-          : []
+          ? session.tags.map(t => t ? this.toString(t, 'tag') : '').filter(Boolean)
+          : [],
+        isRecordingEnabled: Boolean(session.isRecordingEnabled),
+        jitsiConfig: session.jitsiConfig || []
       };
 
       // Add optional price field if it exists
-      if ('price' in session) {
+      if ('price' in session && session.price !== undefined) {
         normalized.price = Number(session.price);
       }
 
       // Add recordSession with a default value
-      normalized.recordSession = false;
+      normalized.recordSession = Boolean(session.isRecordingEnabled);
 
       // Assert the type to Session since we've ensured all required fields are present
       return normalized as Session;
@@ -493,11 +452,8 @@ export class SessionClient {
       if (updates.scheduledTime !== undefined) {
         updateData.scheduledTime = BigInt(updates.scheduledTime.toString());
       }
-      if (updates.duration !== undefined) updateData.duration = Number(updates.duration);
-      if (updates.maxAttendees !== undefined) updateData.maxAttendees = updates.maxAttendees;
-      if (updates.price !== undefined) {
-        updateData.price = updates.price !== undefined ? updates.price : undefined;
-      }
+      if (updates.duration !== undefined) updateData.duration = BigInt(updates.duration);
+      if (updates.maxAttendees !== undefined) updateData.maxAttendees = BigInt(updates.maxAttendees);
       if (updates.recordingUrl !== undefined) {
         (updateData as any).recordingUrl = updates.recordingUrl;
       }
@@ -626,6 +582,56 @@ export class SessionClient {
       console.error(`[SessionClient] Error updating status for session ${sessionId}:`, error);
       throw new Error(`Failed to update session status: ${formatError(error)}`);
     }
+  }
+
+  public async getMySessions(): Promise<Session[]> {
+    return this.getAllSessions();
+  }
+
+  public async startRecording(sessionId: string): Promise<{ ok: any } | { err: string }> {
+    if (!this.currentIdentity) {
+      throw new Error('Must be authenticated to start recording');
+    }
+
+    try {
+      const actor = await this.getActor(true);
+      const result = await (actor as any).startRecording(sessionId);
+      return result;
+    } catch (error) {
+      console.error(`[SessionClient] Error starting recording for session ${sessionId}:`, error);
+      return { err: `Failed to start recording: ${formatError(error)}` };
+    }
+  }
+
+  public async stopRecording(sessionId: string): Promise<{ ok: any } | { err: string }> {
+    if (!this.currentIdentity) {
+      throw new Error('Must be authenticated to stop recording');
+    }
+
+    try {
+      const actor = await this.getActor(true);
+      const result = await (actor as any).stopRecording(sessionId);
+      return result;
+    } catch (error) {
+      console.error(`[SessionClient] Error stopping recording for session ${sessionId}:`, error);
+      return { err: `Failed to stop recording: ${formatError(error)}` };
+    }
+  }
+
+  public getSessionStatusLabel(status: SessionStatus): string {
+    if ('scheduled' in status) return 'Scheduled';
+    if ('live' in status) return 'Live';
+    if ('completed' in status) return 'Completed';
+    if ('cancelled' in status) return 'Cancelled';
+    return 'Unknown';
+  }
+
+  public getSessionTypeLabel(type: SessionType): string {
+    if ('video' in type) return 'Video';
+    if ('voice' in type) return 'Voice';
+    if ('screen_share' in type) return 'Screen Share';
+    if ('webinar' in type) return 'Webinar';
+    return 'Unknown';
   }
 }
 

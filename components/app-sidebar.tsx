@@ -44,7 +44,7 @@ const items = [
   { title: "Overview", href: "/dashboard", icon: Home },
   { title: "Learn", href: "/dashboard/learn", icon: BookOpen },
   { title: "Marketplace", href: "/dashboard/marketplace", icon: ShoppingBag },
-  { title: "Sessions", href: "/dashboard/tutor-hub", icon: Video },
+  { title: "Sessions", href: "/dashboard/sessions", icon: Video },
   { title: "Mentorship", href: "/dashboard/mentorship", icon: UserCheck },
   { title: "Community", href: "/dashboard/community", icon: Users },
   { title: "Forum", href: "/dashboard/forum", icon: MessageSquare },

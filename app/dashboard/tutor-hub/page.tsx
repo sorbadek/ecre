@@ -1,5 +1,5 @@
-import TutorHubPage from "../../tutor-hub/page"
+import { redirect } from 'next/navigation';
 
 export default function DashboardTutorHubPage() {
-  return <TutorHubPage />
+  redirect('/dashboard/sessions');
 }

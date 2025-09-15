@@ -31,9 +31,16 @@ import {
   MessageSquare,
   Share2,
 } from 'lucide-react';
-import { CreateSessionInput, SessionType } from '@/lib/ic/sessions';
+import { sessionClient } from '@/lib/session-client';
+import { useApiClients } from '@/lib/hooks/use-api-clients';
+import type { CreateSessionInput, JitsiConfig, SessionType } from '@/lib/session-client';
 
-import { useApiClients } from '@/lib/use-api-clients';
+interface User {
+  principal?: string;
+  id: string;
+  email?: string;
+  avatar?: string;
+}
 
 const sessionSchema = z.object({
   title: z.string().min(1, 'Title is required').max(100, 'Title must be less than 100 characters'),
@@ -91,7 +98,7 @@ const CreateSessionForm: React.FC<CreateSessionFormProps> = ({
       startWithVideoMuted: false,
       enableScreenSharing: true,
       enableChat: true,
-      requireModerator: true,
+      requireModerator: false,
     },
   });
 
@@ -118,7 +125,7 @@ const CreateSessionForm: React.FC<CreateSessionFormProps> = ({
   };
 
   const onSubmit = async (data: SessionFormData) => {
-    if (!isAuthenticated || !user || !sessionClient) {
+    if (!isAuthenticated || !user) {
       toast.error('Please authenticate first');
       return;
     }
@@ -126,77 +133,47 @@ const CreateSessionForm: React.FC<CreateSessionFormProps> = ({
     setIsSubmitting(true);
 
     try {
-      // Combine date and time into a timestamp
+      // Combine date and time into a timestamp (milliseconds since epoch)
       const scheduledDateTime = new Date(`${data.scheduledDate}T${data.scheduledTime}`);
-      const scheduledTime = BigInt(scheduledDateTime.getTime() * 1_000_000); // Convert to nanoseconds
+      const scheduledTimeMs = scheduledDateTime.getTime();
 
-      // Convert session type to the backend format
-      const sessionType: SessionType = (() => {
-        switch (data.sessionType) {
-          case 'video': return { video: null };
-          case 'voice': return { voice: null };
-          case 'screen_share': return { video: null }; // Map to video for now
-          case 'webinar': return { video: null }; // Map to video for now
-          default: return { video: null };
-        }
-      })();
-
-      // Create Jitsi configuration
-      const jitsiConfig = {
-        roomName: '', 
-        displayName: user.principal || 'Anonymous', // Use principal as display name for now
-        email: [] as [] | [string],
-        avatarUrl: [] as [] | [string],
-        moderator: data.requireModerator,
-        startWithAudioMuted: data.startWithAudioMuted,
-        startWithVideoMuted: data.startWithVideoMuted,
-        enableRecording: data.isRecordingEnabled,
-        enableScreenSharing: data.enableScreenSharing,
-        enableChat: data.enableChat,
-        maxParticipants: [] as [] | [number],
-      };
-
+      // Create the session input with proper types
       const sessionInput: CreateSessionInput = {
         title: data.title,
-        description: data.description,
-        sessionType,
-        scheduledTime,
-        duration: BigInt(data.duration),
+        description: data.description || '',
+        sessionType: { [data.sessionType]: null } as SessionType,
+        scheduledTime: BigInt(scheduledTimeMs),
+        duration: BigInt(data.duration * 60), // Convert minutes to seconds
         maxAttendees: BigInt(data.maxAttendees),
-        hostName: user.principal || 'Anonymous', // Use principal as host name for now
-        hostAvatar: '', // Could be enhanced to use actual avatar
-        tags: data.tags,
+        hostName: user.email || 'Anonymous',
+        hostAvatar: user.avatar || '',
+        tags: data.tags || [],
         isRecordingEnabled: data.isRecordingEnabled || false,
-        jitsiConfig: [jitsiConfig],
+        recordSession: data.isRecordingEnabled || false,
+        jitsiConfig: [{
+          roomName: `peer-${Date.now()}`,
+          displayName: user.email || 'Anonymous',
+          email: user.email ? [user.email] : [],
+          avatarUrl: user.avatar ? [user.avatar] : [],
+          moderator: true,
+          startWithAudioMuted: data.startWithAudioMuted || false,
+          startWithVideoMuted: data.startWithVideoMuted || false,
+          enableRecording: data.isRecordingEnabled || false,
+          enableScreenSharing: data.enableScreenSharing !== false,
+          enableChat: data.enableChat !== false,
+          maxParticipants: data.maxAttendees ? [BigInt(data.maxAttendees)] : []
+        }] as [JitsiConfig],
+        isPrivate: data.isPrivate || false
       };
 
-      // Map to the session client's expected interface
-      const clientInput = {
-        title: sessionInput.title,
-        description: sessionInput.description,
-        sessionType: sessionInput.sessionType,
-        scheduledTime: sessionInput.scheduledTime,
-        duration: Number(sessionInput.duration),
-        maxAttendees: Number(sessionInput.maxAttendees),
-        hostName: sessionInput.hostName,
-        hostAvatar: sessionInput.hostAvatar,
-        tags: sessionInput.tags,
-        recordSession: sessionInput.isRecordingEnabled,
-        isRecordingEnabled: sessionInput.isRecordingEnabled,
-      };
-
-      const result = await sessionClient.createSession(clientInput);
-
-      if ('ok' in result) {
-        toast.success('Session created successfully!');
-        reset();
-        onSuccess?.();
-      } else {
-        throw new Error(result.err);
-      }
+      // Create the session
+      const session = await sessionClient.createSession(sessionInput);
+      
+      toast.success('Session created successfully!');
+      onSuccess?.();
     } catch (error) {
       console.error('Error creating session:', error);
-      toast.error('Failed to create session. Please try again.');
+      toast.error(`Failed to create session: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }

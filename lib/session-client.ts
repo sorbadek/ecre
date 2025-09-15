@@ -16,18 +16,17 @@ type SessionService = _SERVICE & {
   deleteSession: ActorMethod<[string], boolean>;
   searchSessions: ActorMethod<[string], ISession[]>;
   getCompletedSessions: ActorMethod<[], ISession[]>;
-  getSessionsByStatus: ActorMethod<[ISessionStatus], ISession[]>;
+  getSessionsByStatus: ActorMethod<[SessionStatus], ISession[]>;
   whoami: ActorMethod<[], Principal>;
 }
 
 // Constants
 // Get canister ID from environment variable or use default
-const DEFAULT_SESSIONS_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai";
+const DEFAULT_SESSIONS_CANISTER_ID = "e6lpp-6iaaa-aaaaa-qajnq-cai";
 const SESSIONS_CANISTER_ID = process.env.NEXT_PUBLIC_SESSIONS_CANISTER_ID || DEFAULT_SESSIONS_CANISTER_ID;
 
 // Use the IC replica directly
-const LOCAL_HOST = 'https://a4gq6-oaaaa-aaaab-qaa4q-cai.icp0.io';
-const CANDID_INTERFACE = "e5sxd-7iaaa-aaaam-qdtra-cai";
+
 const PRODUCTION_HOST = "https://a4gq6-oaaaa-aaaab-qaa4q-cai.icp0.io";
 
 // API proxy endpoint
@@ -94,8 +93,8 @@ export interface CreateSessionInput {
   description: string;
   sessionType: SessionType;
   scheduledTime: bigint;
-  duration: number;
-  maxAttendees: number;
+  duration: bigint;
+  maxAttendees: bigint;
   price?: number;
   hostName: string;
   hostAvatar: string;

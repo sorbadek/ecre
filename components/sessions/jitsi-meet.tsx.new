@@ -56,7 +56,6 @@ interface JitsiMeetProps {
   onRecordingStop?: (recordingInfo: RecordingInfo) => void;
   onParticipantJoined?: (participant: any) => void;
   onParticipantLeft?: (participant: any) => void;
-  onError?: (error: string) => void;
 }
 
 interface JitsiParticipant {
@@ -75,7 +74,6 @@ const JitsiMeet: React.FC<JitsiMeetProps> = ({
   onRecordingStop,
   onParticipantJoined,
   onParticipantLeft,
-  onError,
 }) => {
   // Refs
   const jitsiContainerRef = useRef<HTMLDivElement>(null);
@@ -138,25 +136,19 @@ const JitsiMeet: React.FC<JitsiMeetProps> = ({
     };
   }, [session, user?.principal]);
 
-  // Derive if current user is the host
-  const isHost = useMemo(() => {
-    return user?.principal?.toString() === session.hostName;
-  }, [user, session.hostName]);
-
   // Audio/Video controls state
   const [isAudioMuted, setIsAudioMuted] = useState(jitsiConfig.startWithAudioMuted || false);
-  const [isVideoMuted, setIsVideoMuted] = useState(jitsiConfig.startWithVideoMuted || true);
+  const [isVideoMuted, setIsVideoMuted] = useState(jitsiConfig.startWithVideoMuted || false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(jitsiConfig.enableChat || false);
 
-  // Get user info for Jitsi with moderator status
+  // Get user info for Jitsi
   const getUserInfo = useCallback(() => ({
     displayName: user?.principal?.toString() || 'Anonymous',
-    email: '',
-    avatar: '',
-    moderator: isHost
-  }), [user, isHost]);
+    email: user?.email || '',
+    avatar: user?.avatarUrl || '',
+  }), [user]);
 
   // Load Jitsi Meet API
   useEffect(() => {
@@ -179,75 +171,16 @@ const JitsiMeet: React.FC<JitsiMeetProps> = ({
     loadJitsiScript();
   }, []);
 
-  // Handle Jitsi connection errors
-  const handleJitsiError = (error: string) => {
-    console.error('Jitsi connection error:', error);
-    
-    // Handle specific error types
-    if (error.includes('membersOnly')) {
-      const errorMsg = 'This is a private session. Please ensure you have the correct access credentials.';
-      console.error('Members-only error detected:', errorMsg);
-      toast.error(errorMsg);
-      if (onError) {
-        onError('members_only_restriction');
-      }
-      return;
-    } else if (error.includes('connection')) {
-      const errorMsg = 'Connection error. Please check your internet connection.';
-      console.error(errorMsg);
-      toast.error(errorMsg);
-    } else if (error.includes('not-allowed')) {
-      const errorMsg = 'You do not have permission to join this session.';
-      console.error('Permission error:', errorMsg);
-      toast.error(errorMsg);
-    }
-    
-    // Call the onError prop if provided
-    if (onError) {
-      onError(error);
-    }
-  };
-
-  // Handle Jitsi connection failures
-  const handleConnectionFailed = (error: any) => {
-    console.error('Jitsi connection failed:', error);
-    if (onError) {
-      onError(`Connection failed: ${error}`);
-    }
-  };
-
   // Initialize Jitsi when loaded and container is ready
   useEffect(() => {
     if (!isJitsiLoaded || !jitsiContainerRef.current) return;
 
-    let api: any = null;
-    
     try {
       const userInfo = getUserInfo();
       
-      // Clean up room name and ensure no lobby suffix
-      // Also ensure we're using a simple room name without any special characters
-      const cleanRoomName = (jitsiConfig.roomName || `session-${session.id}`)
-        .replace('@lobby.meet.jit.si', '')
-        .replace('@conference.', '')
-        .replace(/[^a-zA-Z0-9-]/g, '-') // Replace special chars with dashes
-        .toLowerCase();
-      
-      // Use a consistent room naming convention with session ID
-      const uniqueRoomName = `peerverse-${cleanRoomName}-${session.id}`;
-      
-      // Check if this is a private session and user has access
-      if (session.isPrivate && !isHost) {
-        const errorMsg = 'This is a private session. Only invited participants can join.';
-        toast.error(errorMsg);
-        if (onError) {
-          onError('private_session_restriction');
-        }
-        return;
-      }
-
-      api = new window.JitsiMeetExternalAPI('meet.jit.si', {
-        roomName: uniqueRoomName,
+      // Initialize Jitsi Meet
+      const api = new window.JitsiMeetExternalAPI('meet.jit.si', {
+        roomName: jitsiConfig.roomName,
         width: '100%',
         height: '100%',
         parentNode: jitsiContainerRef.current,
@@ -255,113 +188,48 @@ const JitsiMeet: React.FC<JitsiMeetProps> = ({
           displayName: userInfo.displayName,
           email: userInfo.email,
         },
-        // Ensure we're using the latest Jitsi Meet API
-        serviceUrl: 'https://meet.jit.si/',
         configOverwrite: {
-          // --- Main connection settings ---
-          hosts: {
-            domain: 'meet.jit.si',
-            anonymousdomain: 'guest.meet.jit.si',
-            authdomain: 'meet.jit.si',
-            muc: 'conference.meet.jit.si',
-            focus: 'focus.meet.jit.si',
-          },
-          bosh: '//meet.jit.si/http-bridge',
-          openBridgeChannel: 'websocket',
-          
-          // --- Room access settings ---
-          enableLobby: false,
-          membersOnly: session.isPrivate, // Only enable membersOnly for private sessions
-          enableMembersOnly: session.isPrivate,
-          enableUserAuthentication: false,
-          enableUserRolesBasedOnToken: false,
-          requireDisplayName: false,
-          requireEmail: false,
-          prejoinPageEnabled: false,
-          prejoinConfig: { enabled: false },
-
-          // --- Disable room restrictions and protections ---
-          enableRoomPassword: false,
-          enableLockRoom: false,
-
-          // --- General room behavior and participant settings ---
-          startWithAudioMuted: isHost ? false : jitsiConfig.startWithAudioMuted,
-          startWithVideoMuted: isHost ? false : jitsiConfig.startWithVideoMuted,
-          startAudioOnly: false,
-          channelLastN: -1, // No limit on visible videos
-          p2p: { enabled: false },
-
-          // --- UI/UX and feature flags ---
+          startWithAudioMuted: jitsiConfig.startWithAudioMuted,
+          startWithVideoMuted: jitsiConfig.startWithVideoMuted,
           enableWelcomePage: false,
-          enableClosePage: true,
-          disableDeepLinking: true,
-          enableNoisyMicDetection: false,
-          enableNoAudioDetection: false,
-          enableUserRolesInNotification: false,
-          enableUserRolesInStats: false,
-          
-          // Security - allow all to join without being members
-          disableInviteFunctions: !isHost,
-          disableRemoteControl: !isHost,
-          
-          // Performance
-          enableLayerSuspension: true,
-          startSilent: false,
-          
-          // UI/UX - Simplified
-          hideConferenceSubject: true,
-          hideConferenceTimer: false,
-          hideDisplayName: false,
-          hideEmailInSettings: true,
-          hideLobbyButton: true,
-          hideParticipantsStats: true,
-          hideRecordingLabel: true,
-          hideSipAddNumbersHelp: true,
-          hideSipMediaFilter: true,
-          hideSipSettings: true,
+          enableClosePage: false,
+          enableNoAudioDetection: true,
+          enableNoisyMicDetection: true,
           enableAutomaticUrlCopy: true,
           enableEncodedTransformSupport: true,
+          disableDeepLinking: true,
+          disableInviteFunctions: true,
+          disableRemoteMute: !jitsiConfig.moderator,
+          disableRemoteControl: !jitsiConfig.moderator,
           enableEmailInStats: false,
-          enableInsecureRoomNameWarning: false,
-          enableInsecureRoomWarning: false,
-          
-          // Audio/Video settings
-          // startAudioMuted and startVideoMuted are handled by startWithAudioMuted and startWithVideoMuted
+          enableLobbyChat: jitsiConfig.enableChat,
+          enableWelcomePage: false,
+          prejoinPageEnabled: false,
+          startAudioMuted: jitsiConfig.startWithAudioMuted ? 1 : 0,
+          startVideoMuted: jitsiConfig.startWithVideoMuted ? 1 : 0,
         },
         interfaceConfigOverwrite: {
-          // Branding and UI
           SHOW_JITSI_WATERMARK: false,
           SHOW_WATERMARK_FOR_GUESTS: false,
           SHOW_BRAND_WATERMARK: false,
           SHOW_POWERED_BY: false,
-          
-          // UI Simplification
           DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
           DISABLE_VIDEO_BACKGROUND: true,
           DISABLE_PRESENCE_STATUS: true,
           DISABLE_DOMINANT_SPEAKER_INDICATOR: false,
           DISABLE_TRANSCRIPTION_SUBTITLES: true,
-          
-          // Mobile and app behavior
-          MOBILE_APP_PROMO: false,
-          VERTICAL_FILMSTRIP: true,
-          
-          // Navigation and features
-          HIDE_INVITE_MORE_HEADER: true,
-          RECENT_LIST_ENABLED: false,
-          GENERATE_ROOMNAMES_ON_WELCOME_PAGE: false,
           DISABLE_POLLS: true,
           DISABLE_REACTIONS: true,
           DISABLE_MEETING_NAME: false,
-          
-          // Performance and behavior
+          DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+          MOBILE_APP_PROMO: false,
           MAXIMUM_ZOOMING_COEFFICIENT: 1.0,
           ENABLE_FEEDBACK_ANIMATION: false,
           CLOSE_PAGE_GUEST_HINT: false,
-          
-          // Styling
+          RECENT_LIST_ENABLED: false,
           DEFAULT_BACKGROUND: '#111827',
           DEFAULT_LOGO_URL: '',
+          HIDE_INVITE_MORE_HEADER: true,
           TOOLBAR_BUTTONS: [
             'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
             'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
@@ -387,20 +255,11 @@ const JitsiMeet: React.FC<JitsiMeetProps> = ({
 
       // Cleanup function
       return () => {
-        try {
-          if (api) {
-            console.log('Cleaning up Jitsi instance');
-            api.dispose();
-          }
-        } catch (error) {
-          console.error('Error during Jitsi cleanup:', error);
-        }
+        api.dispose();
+        jitsiApiRef.current = null;
       };
     } catch (error) {
-      console.error('Failed to initialize Jitsi:', error);
-      if (onError) {
-        onError(`Failed to initialize Jitsi: ${error}`);
-      }
+      console.error('Error initializing Jitsi Meet:', error);
       toast.error('Failed to initialize Jitsi Meet. Please try again.');
     }
   }, [isJitsiLoaded, jitsiConfig, getUserInfo]);

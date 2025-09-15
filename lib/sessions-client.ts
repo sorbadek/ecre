@@ -90,6 +90,7 @@ export interface CreateSessionInput {
   tags: string[];
   isRecordingEnabled: boolean;
   jitsiConfig: [] | [JitsiConfig];
+  recordSession: boolean;
 }
 
 export interface UpdateSessionInput {

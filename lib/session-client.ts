@@ -334,7 +334,27 @@ export class SessionClient {
         title: this.toString(session.title, 'title'),
         description: this.toString(session.description, 'description'),
         sessionType: this.normalizeSessionType(session.sessionType),
-        scheduledTime: BigInt(session.scheduledTime?.toString() || '0'),
+        scheduledTime: (() => {
+          try {
+            // Handle the case where scheduledTime might be a number, string, or bigint
+            const time = session.scheduledTime;
+            if (time === undefined || time === null) return 0n;
+            if (typeof time === 'bigint') {
+              // Convert from nanoseconds to milliseconds if needed
+              return time > 1_000_000_000_000n ? time / 1_000_000n : time;
+            }
+            if (typeof time === 'number') return BigInt(Math.floor(time));
+            if (typeof time === 'string') {
+              const parsed = BigInt(time);
+              // Convert from nanoseconds to milliseconds if needed
+              return parsed > 1_000_000_000_000n ? parsed / 1_000_000n : parsed;
+            }
+            return 0n;
+          } catch (e) {
+            console.error('Error parsing scheduledTime:', e, session.scheduledTime);
+            return 0n;
+          }
+        })(),
         duration: Number(session.duration || 0),
         maxAttendees: Number(session.maxAttendees || 0),
         host: session.host ? this.toString(session.host, 'host') : '',

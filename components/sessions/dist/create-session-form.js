@@ -69,7 +69,7 @@ var badge_1 = require("@/components/ui/badge");
 var separator_1 = require("@/components/ui/separator");
 var sonner_1 = require("sonner");
 var lucide_react_1 = require("lucide-react");
-var use_api_clients_1 = require("@/lib/use-api-clients");
+var use_api_clients_1 = require("@/lib/hooks/use-api-clients");
 var sessionSchema = z.object({
     title: z.string().min(1, 'Title is required').max(100, 'Title must be less than 100 characters'),
     description: z.string().max(500, 'Description must be less than 500 characters'),
@@ -130,12 +130,12 @@ var CreateSessionForm = function (_a) {
         setValue('tags', newTags);
     };
     var onSubmit = function (data) { return __awaiter(void 0, void 0, void 0, function () {
-        var scheduledDateTime, scheduledTime, jitsiConfig, sessionInput, scheduledTimeMs, clientInput, result, error_1;
+        var scheduledDateTime, scheduledTimeNs, sessionInput, session, error_1;
         var _a;
         return __generator(this, function (_b) {
             switch (_b.label) {
                 case 0:
-                    if (!isAuthenticated || !user || !sessionClient) {
+                    if (!isAuthenticated || !user) {
                         sonner_1.toast.error('Please authenticate first');
                         return [2 /*return*/];
                     }
@@ -144,61 +144,44 @@ var CreateSessionForm = function (_a) {
                 case 1:
                     _b.trys.push([1, 3, 4, 5]);
                     scheduledDateTime = new Date(data.scheduledDate + "T" + data.scheduledTime);
-                    scheduledTime = BigInt(scheduledDateTime.getTime() * 1000000);
-                    jitsiConfig = {
-                        roomName: "peer-" + Date.now(),
-                        displayName: ((_a = user.principal) === null || _a === void 0 ? void 0 : _a.toString()) || 'Anonymous',
-                        email: [],
-                        avatarUrl: [],
-                        moderator: false,
-                        startWithAudioMuted: Boolean(watchedValues.startWithAudioMuted),
-                        startWithVideoMuted: Boolean(watchedValues.startWithVideoMuted),
-                        enableRecording: Boolean(data.isRecordingEnabled),
-                        enableScreenSharing: Boolean(watchedValues.enableScreenSharing),
-                        enableChat: Boolean(watchedValues.enableChat),
-                        maxParticipants: Number(data.maxAttendees) || 100
-                    };
-                    sessionInput = __assign(__assign({}, data), { sessionType: (function () {
-                            switch (data.sessionType) {
-                                case 'video': return { video: null };
-                                case 'voice': return { voice: null };
-                                case 'screen_share': return { video: null };
-                                case 'webinar': return { video: null };
-                                default: return { video: null };
-                            }
-                        })(), scheduledTime: scheduledTime, duration: BigInt(data.duration), maxAttendees: BigInt(data.maxAttendees), hostName: user.principal || 'Anonymous', hostAvatar: '', tags: data.tags, isRecordingEnabled: data.isRecordingEnabled || false, jitsiConfig: [jitsiConfig] });
-                    scheduledTimeMs = sessionInput.scheduledTime instanceof Date
-                        ? sessionInput.scheduledTime.getTime()
-                        : Number(sessionInput.scheduledTime);
-                    clientInput = {
-                        title: sessionInput.title,
+                    scheduledTimeNs = BigInt(scheduledDateTime.getTime()) * 1000000n;
+                    sessionInput = {
+                        title: data.title,
                         description: data.description || '',
-                        sessionType: sessionInput.sessionType,
-                        scheduledTime: BigInt(scheduledTimeMs) * BigInt(1000000),
-                        duration: BigInt(Number(sessionInput.duration || 1) * 60 * 60 * 1000000000),
-                        maxAttendees: BigInt(sessionInput.maxAttendees || 10),
-                        hostName: sessionInput.hostName,
-                        hostAvatar: sessionInput.hostAvatar || '',
-                        tags: sessionInput.tags || [],
-                        isRecordingEnabled: sessionInput.isRecordingEnabled || false,
-                        jitsiConfig: jitsiConfig ? [jitsiConfig] : []
+                        sessionType: (_a = {}, _a[data.sessionType] = null, _a),
+                        scheduledTime: scheduledTimeNs,
+                        duration: BigInt(data.duration * 60),
+                        maxAttendees: BigInt(data.maxAttendees),
+                        hostName: user.email || 'Anonymous',
+                        hostAvatar: user.avatar || '',
+                        tags: data.tags || [],
+                        isRecordingEnabled: data.isRecordingEnabled || false,
+                        recordSession: data.isRecordingEnabled || false,
+                        jitsiConfig: [{
+                                roomName: "peer-" + Date.now(),
+                                displayName: user.email || 'Anonymous',
+                                email: user.email ? [user.email] : [],
+                                avatarUrl: user.avatar ? [user.avatar] : [],
+                                moderator: true,
+                                startWithAudioMuted: data.startWithAudioMuted || false,
+                                startWithVideoMuted: data.startWithVideoMuted || false,
+                                enableRecording: data.isRecordingEnabled || false,
+                                enableScreenSharing: data.enableScreenSharing !== false,
+                                enableChat: data.enableChat !== false,
+                                maxParticipants: data.maxAttendees ? [BigInt(data.maxAttendees)] : []
+                            }],
+                        isPrivate: data.isPrivate || false
                     };
-                    return [4 /*yield*/, sessionClient.createSession(clientInput)];
+                    return [4 /*yield*/, sessionClient.createSession(sessionInput)];
                 case 2:
-                    result = _b.sent();
-                    if ('ok' in result) {
-                        sonner_1.toast.success('Session created successfully!');
-                        reset();
-                        onSuccess === null || onSuccess === void 0 ? void 0 : onSuccess();
-                    }
-                    else {
-                        throw new Error(result.err);
-                    }
+                    session = _b.sent();
+                    sonner_1.toast.success('Session created successfully!');
+                    onSuccess === null || onSuccess === void 0 ? void 0 : onSuccess();
                     return [3 /*break*/, 5];
                 case 3:
                     error_1 = _b.sent();
                     console.error('Error creating session:', error_1);
-                    sonner_1.toast.error('Failed to create session. Please try again.');
+                    sonner_1.toast.error("Failed to create session: " + (error_1 instanceof Error ? error_1.message : 'Unknown error'));
                     return [3 /*break*/, 5];
                 case 4:
                     setIsSubmitting(false);

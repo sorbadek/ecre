@@ -133,16 +133,16 @@ const CreateSessionForm: React.FC<CreateSessionFormProps> = ({
     setIsSubmitting(true);
 
     try {
-      // Combine date and time into a timestamp (milliseconds since epoch)
       const scheduledDateTime = new Date(`${data.scheduledDate}T${data.scheduledTime}`);
-      const scheduledTimeMs = scheduledDateTime.getTime();
+      // Convert to nanoseconds (1 millisecond = 1,000,000 nanoseconds)
+      const scheduledTimeNs = BigInt(scheduledDateTime.getTime()) * 1_000_000n;
 
       // Create the session input with proper types
       const sessionInput: CreateSessionInput = {
         title: data.title,
         description: data.description || '',
         sessionType: { [data.sessionType]: null } as SessionType,
-        scheduledTime: BigInt(scheduledTimeMs),
+        scheduledTime: scheduledTimeNs,
         duration: BigInt(data.duration * 60), // Convert minutes to seconds
         maxAttendees: BigInt(data.maxAttendees),
         hostName: user.email || 'Anonymous',

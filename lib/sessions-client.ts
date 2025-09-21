@@ -525,8 +525,19 @@ class SessionsClient {
   }
 
   formatDateTime(timestamp: bigint): string {
-    const date = new Date(Number(timestamp) / 1_000_000);
-    return date.toLocaleString();
+    // Convert nanoseconds to milliseconds for JavaScript Date
+    const milliseconds = Number(timestamp) / 1_000_000;
+    const date = new Date(milliseconds);
+    
+    // Format the date and time in a user-friendly way
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   }
 
   isSessionLive(session: Session): boolean {
@@ -534,14 +545,22 @@ class SessionsClient {
   }
 
   canJoinSession(session: Session): boolean {
-    const now = Date.now() * 1_000_000; // Convert to nanoseconds
-    const startTime = Number(session.scheduledTime);
-    const endTime = startTime + Number(session.duration) * 60 * 1_000_000_000;
-    const timeUntilStart = startTime - now;
-    const timeUntilEnd = endTime - now;
+    try {
+      const nowNs = BigInt(Date.now()) * 1_000_000n; // Current time in nanoseconds
+      const startTimeNs = session.scheduledTime;
+      const durationNs = BigInt(session.duration) * 60n * 1_000_000_000n; // Convert minutes to nanoseconds
+      const endTimeNs = startTimeNs + durationNs;
+      
+      const timeUntilStartNs = startTimeNs - nowNs;
+      const timeUntilEndNs = endTimeNs - nowNs;
+      const fifteenMinutesNs = 15n * 60n * 1_000_000_000n; // 15 minutes in nanoseconds
 
-    // Can join 15 minutes before start and until end time
-    return timeUntilStart <= 15 * 60 * 1_000_000_000 && timeUntilEnd > 0;
+      // Can join 15 minutes before start and until end time
+      return timeUntilStartNs <= fifteenMinutesNs && timeUntilEndNs > 0n;
+    } catch (error) {
+      console.error('Error in canJoinSession:', error);
+      return false;
+    }
   }
 }
 

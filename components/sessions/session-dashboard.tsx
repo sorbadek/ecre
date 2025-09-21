@@ -190,17 +190,60 @@ const SessionDashboard: React.FC<SessionDashboardProps> = ({ className }) => {
   };
 
   const handleJoinSession = async (session: Session) => {
-    if (!sessionClient) return;
+    console.log('handleJoinSession called with session:', {
+      sessionId: session?.id,
+      sessionTitle: session?.title,
+      hasClient: !!sessionClient
+    });
+
+    if (!sessionClient) {
+      const errorMsg = 'Session client is not available';
+      console.error(errorMsg);
+      toast.error(errorMsg);
+      return;
+    }
+
+    if (!session?.id) {
+      const errorMsg = `Cannot join session: Invalid session ID. Session object: ${JSON.stringify(session)}`;
+      console.error(errorMsg);
+      toast.error('Cannot join session: Invalid session data');
+      return;
+    }
     
     try {
-      await sessionClient.joinSession(session.id);
+      console.log('Attempting to join session with ID:', session.id);
+      const result = await sessionClient.joinSession(session.id);
+      console.log('Successfully joined session:', {
+        sessionId: result.session.id,
+        isModerator: result.isModerator
+      });
+      
       setSelectedSession(session);
       setShowJitsiMeet(true);
       toast.success('Joined session successfully');
       loadSessions(); // Refresh to update participant count
     } catch (error) {
-      console.error('Error joining session:', error);
-      toast.error('Failed to join session');
+      const errorDetails = error instanceof Error ? {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      } : String(error);
+      
+      console.error('Error joining session:', {
+        error: errorDetails,
+        sessionId: session?.id,
+        timestamp: new Date().toISOString()
+      });
+      
+      const errorMessage = error instanceof Error 
+        ? `Failed to join session: ${error.message}` 
+        : 'An unknown error occurred while joining the session';
+      
+      toast.error(errorMessage);
+      
+      // Always refresh the sessions list on error as the session data might be stale
+      console.log('Refreshing sessions list due to error...');
+      loadSessions();
     }
   };
 
@@ -219,11 +262,41 @@ const SessionDashboard: React.FC<SessionDashboardProps> = ({ className }) => {
     }
   };
 
+  const isSessionOwner = (session: Session): boolean => {
+    if (!user?.principal) {
+      console.log('No user principal available');
+      return false;
+    }
+    try {
+      // Convert both to strings for comparison
+      const hostPrincipal = typeof session.host === 'string' 
+        ? session.host 
+        : session.host.toString();
+      const userPrincipal = user.principal.toString();
+      
+      const isOwner = hostPrincipal === userPrincipal;
+      
+      console.log('Session owner check:', {
+        sessionId: session.id,
+        host: hostPrincipal,
+        currentUser: userPrincipal,
+        isOwner
+      });
+      
+      return isOwner;
+    } catch (error) {
+      console.error('Error checking session owner:', error);
+      return false;
+    }
+  };
+
   const handleDeleteSession = async (sessionId: string) => {
     if (!sessionClient) return;
-    if (!confirm('Are you sure you want to delete this session?')) return;
-
+    
     try {
+      const confirmed = window.confirm('Are you sure you want to delete this session? This action cannot be undone.');
+      if (!confirmed) return;
+      
       await sessionClient.deleteSession(sessionId);
       toast.success('Session deleted successfully');
       loadSessions();
@@ -300,20 +373,49 @@ const SessionDashboard: React.FC<SessionDashboardProps> = ({ className }) => {
   };
 
   const formatDate = (timestamp: bigint): string => {
-    const date = new Date(Number(timestamp) / 1_000_000);
-    return date.toLocaleString();
+    try {
+      // Convert nanoseconds to milliseconds for JavaScript Date
+      const milliseconds = Number(timestamp) / 1_000_000;
+      const date = new Date(milliseconds);
+      
+      // Format the date and time in a user-friendly way
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Invalid date';
+    }
   };
 
   const formatDuration = (startTime: bigint, endTime?: bigint): string => {
     if (!endTime) return 'Ongoing';
-    const duration = Number(endTime - startTime) / 1_000_000_000; // Convert to seconds
-    const hours = Math.floor(duration / 3600);
-    const minutes = Math.floor((duration % 3600) / 60);
     
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
+    try {
+      // Convert nanoseconds to seconds
+      const durationNs = endTime - startTime;
+      const durationSecs = Number(durationNs) / 1_000_000_000;
+      
+      const hours = Math.floor(durationSecs / 3600);
+      const minutes = Math.floor((durationSecs % 3600) / 60);
+      const seconds = Math.floor(durationSecs % 60);
+
+      if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`;
+      } else if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+      } else {
+        return `${seconds}s`;
+      }
+    } catch (error) {
+      console.error('Error formatting duration:', error);
+      return 'Unknown';
     }
-    return `${minutes}m`;
   };
 
   const canJoinSession = (session: Session): boolean => {
@@ -321,11 +423,6 @@ const SessionDashboard: React.FC<SessionDashboardProps> = ({ className }) => {
     return status === 'live' || status === 'scheduled';
   };
 
-  const isSessionOwner = (session: Session): boolean => {
-    // This would need to be implemented based on your authentication system
-    // For now, assuming all sessions can be managed by the current user
-    return true;
-  };
 
   // Show loading state while auth is loading or sessionClient is not ready
   if (authLoading || !sessionClient) {
@@ -608,7 +705,11 @@ const SessionsContent: React.FC<SessionsContentProps> = ({
                           </span>
                           <span className="flex items-center space-x-1">
                             <Users className="h-3 w-3" />
-                            <span>{Number(session.participantCount)} participants</span>
+                            <span>
+                              {typeof session.participantCount === 'number' 
+                                ? `${session.participantCount} participant${session.participantCount !== 1 ? 's' : ''}`
+                                : '0 participants'}
+                            </span>
                           </span>
                           <span className="flex items-center space-x-1">
                             <Clock className="h-3 w-3" />
@@ -627,34 +728,35 @@ const SessionsContent: React.FC<SessionsContentProps> = ({
                       </div>
                     </div>
 
-                    {/* Actions */}
+                    {/* Session Actions */}
                     <div className="flex items-center space-x-2">
-                      {canJoinSession(session) && (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => onJoinSession(session)}
-                        >
-                          <Play className="h-4 w-4 mr-1" />
-                          Join
-                        </Button>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onCopyMeetingUrl(session.meetingUrl || '')}
-                      >
-                        <Copy className="h-4 w-4 mr-1" />
-                        Copy URL
-                      </Button>
-                      {isSessionOwner(session) && (
+                      {session.meetingUrl && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => onDeleteSession(session.id)}
+                          onClick={() => onCopyMeetingUrl(session.meetingUrl || '')}
+                          className="text-xs"
                         >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Delete
+                          <Copy className="h-3 w-3 mr-1" /> Copy Link
+                        </Button>
+                      )}
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => onJoinSession(session)}
+                        disabled={!canJoinSession(session)}
+                        className="text-xs"
+                      >
+                        <Play className="h-3 w-3 mr-1" /> Join
+                      </Button>
+                      {isSessionOwner(session) && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => onDeleteSession(session.id)}
+                          className="text-xs"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" /> Delete
                         </Button>
                       )}
                     </div>

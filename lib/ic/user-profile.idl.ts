@@ -1,6 +1,6 @@
 import type { IDL } from "@dfinity/candid"
 
-export const idlFactory = ({ IDL }: { IDL: IDL }) => {
+export const idlFactory = ({ IDL }) => {
   const Principal = IDL.Principal
 
   const UserSettings = IDL.Record({

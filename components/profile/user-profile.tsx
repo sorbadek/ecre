@@ -16,18 +16,36 @@ import { toast } from "sonner"
 import { User, Mail, Phone, MapPin, Briefcase, GraduationCap, Globe, Link as LinkIcon, X, Plus, Camera } from "lucide-react"
 import { getMyProfile, updateProfile, uploadAvatar, uploadCover } from "@/lib/profile-client"
 
+interface UserProfileType {
+  name: string;
+  email: string;
+  bio?: string;
+  location?: string;
+  website?: string;
+  company?: string;
+  jobTitle?: string;
+  education?: string;
+  phone?: string;
+  skills: string[];
+  interests: string[];
+  avatarUrl?: string;
+  coverImageUrl?: string;
+  coverUrl?: string;
+}
+
 interface UserProfileProps {
   isEditable?: boolean
   userId?: string
+  onUpdate?: () => Promise<void> | void
 }
 
-export function UserProfile({ isEditable = true, userId }: UserProfileProps) {
+export function UserProfile({ isEditable = true, userId, onUpdate }: UserProfileProps) {
   const { user } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   
   // Profile state
-  const [profile, setProfile] = useState({
+  const [profile, setProfile] = useState<Partial<UserProfileType>>({
     name: '',
     email: '',
     bio: '',
@@ -44,7 +62,7 @@ export function UserProfile({ isEditable = true, userId }: UserProfileProps) {
   })
   
   // Form state
-  const [formData, setFormData] = useState(profile)
+  const [formData, setFormData] = useState<Partial<UserProfileType>>(profile)
   const [newSkill, setNewSkill] = useState('')
   const [newInterest, setNewInterest] = useState('')
   
@@ -90,45 +108,50 @@ export function UserProfile({ isEditable = true, userId }: UserProfileProps) {
   }
   
   // Add a new skill
-  const addSkill = () => {
-    if (newSkill.trim() && !formData.skills.includes(newSkill.trim())) {
+  const addSkill = (): void => {
+    const trimmedSkill = newSkill.trim()
+    if (trimmedSkill && !formData.skills?.includes(trimmedSkill)) {
       setFormData(prev => ({
         ...prev,
-        skills: [...prev.skills, newSkill.trim()]
+        skills: [...(prev.skills || []), trimmedSkill]
       }))
       setNewSkill('')
     }
   }
   
   // Remove a skill
-  const removeSkill = (skillToRemove: string) => {
+  const removeSkill = (skillToRemove: string): void => {
     setFormData(prev => ({
       ...prev,
-      skills: prev.skills.filter(skill => skill !== skillToRemove)
+      skills: (prev.skills || []).filter(skill => skill !== skillToRemove)
     }))
   }
   
   // Add a new interest
-  const addInterest = () => {
-    if (newInterest.trim() && !formData.interests.includes(newInterest.trim())) {
+  const addInterest = (): void => {
+    const trimmedInterest = newInterest.trim()
+    if (trimmedInterest && !formData.interests?.includes(trimmedInterest)) {
       setFormData(prev => ({
         ...prev,
-        interests: [...prev.interests, newInterest.trim()]
+        interests: [...(prev.interests || []), trimmedInterest]
       }))
       setNewInterest('')
     }
   }
   
   // Remove an interest
-  const removeInterest = (interestToRemove: string) => {
-    setFormData(prev => ({
-      ...prev,
-      interests: prev.interests.filter(interest => interest !== interestToRemove)
-    }))
+  const removeInterest = (interestToRemove: string): void => {
+    setFormData(prev => {
+      const currentInterests = prev.interests || [];
+      return {
+        ...prev,
+        interests: currentInterests.filter(interest => interest !== interestToRemove)
+      };
+    });
   }
   
   // Handle form submission
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     
     try {
@@ -152,7 +175,7 @@ export function UserProfile({ isEditable = true, userId }: UserProfileProps) {
   }
   
   // Handle avatar upload
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0]
     if (!file) return
     
@@ -173,23 +196,40 @@ export function UserProfile({ isEditable = true, userId }: UserProfileProps) {
   }
   
   // Handle cover image upload
-  const handleCoverImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverImageUpload = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0]
     if (!file) return
     
     try {
       setIsLoading(true)
+      // 1. Upload the cover image
       const imageUrl = await uploadCover(file)
+      
+      // 2. Update the profile with the new cover URL
+      await updateProfile({
+        ...formData,
+        coverUrl: imageUrl
+      })
+      
+      // 3. Update local state
       setFormData(prev => ({
         ...prev,
         coverImageUrl: imageUrl
       }))
+      
+      // 4. Refresh profile data to ensure consistency
+      if (onUpdate) {
+        await onUpdate()
+      }
+      
       toast.success("Cover image updated successfully")
     } catch (error) {
       console.error("Error uploading cover image:", error)
-      toast.error("Failed to upload cover image")
+      toast.error(error instanceof Error ? error.message : "Failed to upload cover image")
     } finally {
       setIsLoading(false)
+      // Reset the file input to allow selecting the same file again
+      e.target.value = ''
     }
   }
   

@@ -534,13 +534,16 @@ persistent actor Sessions {
         }
     };
 
-    public shared(msg) func joinSession(sessionId: Text): async Result.Result<Session, Text> {
+    public shared(msg) func joinSession(sessionId: Text): async Result.Result<{session: Session; isModerator: Bool}, Text> {
         let caller = msg.caller;
         
         let updatedSession = switch (updateSessionStatusById(sessionId)) {
             case (?s) { s };
             case null { return #err("Session not found") };
         };
+        
+        // Check if user is the host (moderator)
+        let isModerator = updatedSession.host == caller;
         
         switch (updatedSession.status) {
             case (#completed or #cancelled) {
@@ -565,7 +568,10 @@ persistent actor Sessions {
         };
                 
         if (Array.find<Principal>(updatedSession.attendees, func(p) { p == caller }) != null) {
-            return #ok(updatedSession);
+            return #ok({
+                session = updatedSession;
+                isModerator = updatedSession.host == caller;
+            });
         };
         
         if (updatedSession.attendees.size() >= updatedSession.maxAttendees) {
@@ -586,7 +592,10 @@ persistent actor Sessions {
         sessions.put(sessionId, finalSession);
         addUserSession(caller, sessionId);
         
-        #ok(finalSession)
+        #ok({
+            session = finalSession;
+            isModerator = finalSession.host == caller;
+        });
     };
 
     public shared(msg) func leaveSession(sessionId: Text): async Result.Result<Session, Text> {
@@ -657,13 +666,21 @@ persistent actor Sessions {
     public query func getAllSessions(): async [Session] {
         let allSessions = Iter.toArray(sessions.vals());
         Array.map<Session, Session>(allSessions, func(session) {
-            updateSessionStatus(session)
+            let updated = updateSessionStatus(session);
+            // Ensure the host field is properly serialized
+            {
+                updated with host = updated.host
+            }
         })
     };
 
     public query func getSession(id: Text): async ?Session {
         switch (sessions.get(id)) {
-            case (?session) { ?updateSessionStatus(session) };
+            case (?session) { 
+                let updated = updateSessionStatus(session);
+                // Ensure the host field is properly serialized
+                ?{ updated with host = updated.host }
+            };
             case null { null };
         }
     };
@@ -680,7 +697,14 @@ persistent actor Sessions {
         switch (userSessions.get(caller)) {
             case (?sessionIds) {
                 let mySessions = Array.mapFilter<Text, Session>(sessionIds, func(id) {
-                    sessions.get(id)
+                    switch (sessions.get(id)) {
+                        case (?session) { 
+                            let updated = updateSessionStatus(session);
+                            // Ensure the host field is properly serialized
+                            ?{ updated with host = updated.host }
+                        };
+                        case null { null };
+                    }
                 });
                 mySessions
             };

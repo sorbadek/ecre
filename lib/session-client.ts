@@ -8,7 +8,7 @@ import { _SERVICE, Session as ISession, CreateSessionInput as ICreateSessionInpu
 type SessionService = _SERVICE & {
   createSession: ActorMethod<[ICreateSessionInput], { ok: ISession } | { err: string }>;
   updateSession: ActorMethod<[string, Partial<ICreateSessionInput>], { ok: ISession } | { err: string }>;
-  joinSession: ActorMethod<[string], { ok: ISession } | { err: string }>;
+  joinSession: ActorMethod<[string], { ok: { session: ISession; isModerator: boolean } } | { err: string }>;
   getSession: ActorMethod<[string], ISession | null>;
   getAllSessions: ActorMethod<[], ISession[]>;
   getMySessions: ActorMethod<[], ISession[]>;
@@ -22,15 +22,13 @@ type SessionService = _SERVICE & {
 
 // Constants
 // Get canister ID from environment variable or use default
-const DEFAULT_SESSIONS_CANISTER_ID = "e6lpp-6iaaa-aaaaa-qajnq-cai";
+const DEFAULT_SESSIONS_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai";
 const SESSIONS_CANISTER_ID = process.env.NEXT_PUBLIC_SESSIONS_CANISTER_ID || DEFAULT_SESSIONS_CANISTER_ID;
 
 // Use the IC replica directly
 
 const PRODUCTION_HOST = "https://a4gq6-oaaaa-aaaab-qaa4q-cai.icp0.io";
 
-// API proxy endpoint
-const API_PROXY_ENDPOINT = "/api/ic-proxy";
 
 console.log('[SessionClient] Using canister ID:', SESSIONS_CANISTER_ID);
 
@@ -80,13 +78,36 @@ const fetchRootKey = async (agent: HttpAgent): Promise<boolean> => {
   }
 };
 
-export type SessionType = { video: null } | { voice: null };
+// Import the SessionType and other types from the IDL
+export type { SessionType, SessionStatus as IDLSessionStatus } from './ic/sessions';
 
+// Re-export the SessionType for backward compatibility
+export type SessionType = { video: null } | { voice: null } | { screen_share: null } | { webinar: null };
+
+// Helper function to create session types
+export const createSessionType = (type: 'video' | 'voice' | 'screen_share' | 'webinar'): SessionType => {
+  // This is a type-safe way to create a SessionType
+  switch (type) {
+    case 'video':
+      return { video: null };
+    case 'voice':
+      return { voice: null };
+    case 'screen_share':
+      return { screen_share: null };
+    case 'webinar':
+      return { webinar: null };
+    default:
+      return { video: null }; // Default to video
+  }
+};
+
+// Session status type that matches the IDL
 export type SessionStatus = 
-  | { scheduled: null }
-  | { live: null }
-  | { completed: null }
-  | { cancelled: null };
+  | { scheduled: null } 
+  | { live: null } 
+  | { completed: null } 
+  | { cancelled: null } 
+  | { recording: null };
 
 export interface CreateSessionInput {
   title: string;
@@ -101,6 +122,7 @@ export interface CreateSessionInput {
   tags: string[];
   recordSession: boolean;
   isRecordingEnabled: boolean;
+  isPrivate?: boolean;
   recordingUrl?: string | null;
 }
 
@@ -123,17 +145,15 @@ export interface Session {
   recordingUrl?: string | null;
   meetingUrl?: string | null;
   tags: string[];
-  recordSession: boolean;
-  err?: any;
-  // Additional properties expected by components
-  recordingInfo?: any;
-  jitsiRoomName?: string;
-  jitsiConfig?: any;
-  isRecordingEnabled?: boolean;
-  participantCount?: number;
+  isRecordingEnabled: boolean;
+  jitsiConfig: JitsiConfig | null;
+  participantCount: number;
   actualEndTime?: bigint;
   actualStartTime?: bigint;
   maxParticipants?: number;
+  isPrivate: boolean;
+  // For error handling
+  err?: any;
 }
 
 // Declare global type for window.sessionClient
@@ -315,9 +335,15 @@ export class SessionClient {
   
   private toString(value: any, fieldName: string): string {
     if (value === undefined || value === null) {
-      throw new Error(`Missing required field: ${fieldName}`);
+      console.warn(`[SessionClient] Missing field: ${fieldName}, using empty string as fallback`);
+      return '';
     }
-    return String(value);
+    try {
+      return String(value);
+    } catch (error) {
+      console.warn(`[SessionClient] Error converting field ${fieldName} to string:`, error);
+      return '';
+    }
   }
 
   private normalizeSession(session: ISession): Session {
@@ -328,102 +354,145 @@ export class SessionClient {
     try {
       console.log('[SessionClient] Normalizing session data:', session);
       
-      // Normalize the session data with safe field access
+      // Helper function to safely get string with fallback
+      const safeString = (value: any, fieldName: string, defaultValue: string = ''): string => {
+        try {
+          return value !== undefined && value !== null ? String(value) : defaultValue;
+        } catch (error) {
+          console.warn(`[SessionClient] Error processing field ${fieldName}:`, error);
+          return defaultValue;
+        }
+      };
+      
+      // First, create a normalized session with default values
       const normalized: Partial<Session> = {
-        id: this.toString(session.id, 'id'),
-        title: this.toString(session.title, 'title'),
-        description: this.toString(session.description, 'description'),
-        sessionType: this.normalizeSessionType(session.sessionType),
+        id: session?.id ? String(session.id) : `temp-${Date.now()}`,
+        title: safeString(session?.title, 'title', 'Untitled Session'),
+        description: safeString(session?.description, 'description', ''),
+        sessionType: session?.sessionType ? this.normalizeSessionType(session.sessionType) : { video: null },
         scheduledTime: (() => {
           try {
-            // Handle the case where scheduledTime might be a number, string, or bigint
             const time = session.scheduledTime;
-            if (time === undefined || time === null) return 0n;
-            if (typeof time === 'bigint') {
-              // Convert from nanoseconds to milliseconds if needed
-              return time > 1_000_000_000_000n ? time / 1_000_000n : time;
-            }
-            if (typeof time === 'number') return BigInt(Math.floor(time));
+            if (time === undefined || time === null) return BigInt(0);
+            if (typeof time === 'bigint') return time;
+            if (typeof time === 'number') return BigInt(time);
             if (typeof time === 'string') {
-              const parsed = BigInt(time);
-              // Convert from nanoseconds to milliseconds if needed
-              return parsed > 1_000_000_000_000n ? parsed / 1_000_000n : parsed;
+              const parsed = parseInt(time, 10);
+              return isNaN(parsed) ? BigInt(0) : BigInt(parsed);
             }
-            return 0n;
-          } catch (e) {
-            console.error('Error parsing scheduledTime:', e, session.scheduledTime);
-            return 0n;
+            return BigInt(0);
+          } catch (error) {
+            console.error('Error parsing scheduledTime:', error);
+            return BigInt(0);
           }
         })(),
-        duration: Number(session.duration || 0),
-        maxAttendees: Number(session.maxAttendees || 0),
-        host: session.host ? this.toString(session.host, 'host') : '',
-        hostName: session.hostName ? this.toString(session.hostName, 'hostName') : '',
+        duration: typeof session.duration === 'number' ? session.duration : 0,
+        maxAttendees: typeof session.maxAttendees === 'number' ? session.maxAttendees : 10,
+        host: '', // Will be set below
+        hostName: session.hostName ? this.toString(session.hostName, 'hostName') : 'Unknown Host',
         hostAvatar: session.hostAvatar ? this.toString(session.hostAvatar, 'hostAvatar') : '',
         status: this.normalizeSessionStatus(session.status),
         attendees: Array.isArray(session.attendees) 
           ? session.attendees.map(a => a ? this.toString(a, 'attendee') : '').filter(Boolean)
           : [],
-        createdAt: BigInt(session.createdAt?.toString() || Date.now().toString() + '000000'),
-        updatedAt: session.updatedAt ? BigInt(session.updatedAt.toString()) : BigInt(Date.now() * 1_000_000),
-        recordingUrl: session.recordingUrl ? this.toString(session.recordingUrl, 'recordingUrl') : null,
-        meetingUrl: session.meetingUrl ? this.toString(session.meetingUrl, 'meetingUrl') : null,
-        tags: Array.isArray(session.tags) 
-          ? session.tags.map(t => t ? this.toString(t, 'tag') : '').filter(Boolean)
-          : [],
+        participantCount: Array.isArray(session.attendees) ? session.attendees.length : 0,
         isRecordingEnabled: Boolean(session.isRecordingEnabled),
-        jitsiConfig: session.jitsiConfig || []
+        jitsiConfig: session.jitsiConfig && Array.isArray(session.jitsiConfig) && session.jitsiConfig.length > 0 
+          ? session.jitsiConfig[0] 
+          : null,
+        isRecordingEnabled: Boolean(session.isRecordingEnabled),
+        isPrivate: Boolean(session.isPrivate),
+        recordingUrl: session.recordingUrl || null,
+        meetingUrl: session.meetingUrl || null,
+        tags: Array.isArray(session.tags) ? session.tags.map(t => this.toString(t, 'tag')) : [],
+        createdAt: session.createdAt ? BigInt(session.createdAt.toString()) : BigInt(0),
+        updatedAt: session.updatedAt ? BigInt(session.updatedAt.toString()) : BigInt(0),
       };
 
-      // Add optional price field if it exists
-      if ('price' in session && session.price !== undefined) {
-        normalized.price = Number(session.price);
+      // Handle host field more robustly
+      try {
+        if (session.host) {
+          normalized.host = this.toString(session.host, 'host');
+        } else if (session['hostId']) {
+          normalized.host = this.toString(session['hostId'], 'hostId');
+        } else if (session['creator']) {
+          normalized.host = this.toString(session['creator'], 'creator');
+        } else if (session['owner']) {
+          normalized.host = this.toString(session['owner'], 'owner');
+        } else if (this.currentIdentity) {
+          normalized.host = this.currentIdentity.getPrincipal().toString();
+        } else {
+          normalized.host = `generated-host-${Date.now()}`;
+        }
+      } catch (hostError) {
+        console.warn('Error processing host field, using fallback host ID');
+        normalized.host = `fallback-host-${Date.now()}`;
       }
 
-      // Add recordSession with a default value
-      normalized.recordSession = Boolean(session.isRecordingEnabled);
+      // Handle optional price field
+      if ('price' in session && session.price !== undefined) {
+        try {
+          (normalized as any).price = Number(session.price);
+        } catch (priceError) {
+          console.warn('Error processing price field, skipping');
+        }
+      }
 
-      // Assert the type to Session since we've ensured all required fields are present
       return normalized as Session;
     } catch (error) {
       console.error('[SessionClient] Error normalizing session:', error, session);
-      throw new Error(`Failed to normalize session: ${error instanceof Error ? error.message : String(error)}`);
+      // Return a minimal valid session object as fallback
+      return {
+        id: 'error-session-' + Date.now(),
+        title: 'Error Loading Session',
+        description: 'There was an error loading this session',
+        sessionType: { video: null },
+        scheduledTime: BigInt(0),
+        duration: 0,
+        maxAttendees: 0,
+        host: 'system',
+        hostName: 'System',
+        hostAvatar: '',
+        status: { scheduled: null },
+        attendees: [],
+        participantCount: 0,
+        recordSession: false,
+        isRecordingEnabled: false,
+        isPrivate: false,
+        recordingUrl: null,
+        meetingUrl: null,
+        tags: [],
+        createdAt: BigInt(0),
+        updatedAt: BigInt(0)
+      };
     }
   }
 
   private normalizeSessionStatus(status: any): SessionStatus {
-    if (typeof status === 'object' && status !== null) {
-      if ('scheduled' in status) return { scheduled: null };
-      if ('live' in status) return { live: null };
-      if ('completed' in status) return { completed: null };
-      if ('cancelled' in status) return { cancelled: null };
+    if (status === null || typeof status !== 'object') {
+      return { scheduled: null };
     }
+    
+    if ('scheduled' in status) return { scheduled: null };
+    if ('live' in status) return { live: null };
+    if ('completed' in status) return { completed: null };
+    if ('cancelled' in status) return { cancelled: null };
+    if ('recording' in status) return { recording: null };
+    
     return { scheduled: null };
   }
 
   private normalizeSessionType(type: any): SessionType {
-    if (typeof type === 'object' && type !== null) {
-      if ('video' in type) return { video: null };
-      if ('voice' in type) return { voice: null };
+    if (type === null || typeof type !== 'object') {
+      return { video: null }; // Default to video session type
     }
-    return { video: null };
-  }
-
-  public async getSession(sessionId: string): Promise<Session | null> {
-    try {
-      const actor = await this.getActor(false);
-      const result = await actor.getSession(sessionId);
-      
-      if (!result) {
-        console.warn(`[SessionClient] No result received for session ${sessionId}`);
-        return null;
-      }
-
-      return this.normalizeSession(result);
-    } catch (error) {
-      console.error(`[SessionClient] Error getting session ${sessionId}:`, error);
-      return null;
-    }
+    
+    if ('video' in type) return { video: null };
+    if ('voice' in type) return { voice: null };
+    if ('screen_share' in type) return { screen_share: null };
+    if ('webinar' in type) return { webinar: null };
+    
+    return { video: null }; // Default to video type
   }
 
   public async getAllSessions(maxRetries = 3, retryDelay = 1000): Promise<Session[]> {
@@ -506,44 +575,147 @@ export class SessionClient {
     }
 
     try {
+      console.log(`[SessionClient] Deleting session ${sessionId}`);
       const actor = await this.getActor(true);
-      const result = await (actor as any).deleteSession(sessionId);
+      // The canister returns a boolean directly for delete operations
+      const success = await (actor as any).deleteSession(sessionId);
       
-      if (!result) {
+      if (success === undefined || success === null) {
+        console.error('[SessionClient] No response received from canister when deleting session');
         throw new Error('No response received from canister');
       }
       
-      if ('err' in result) {
-        throw new Error(`Failed to delete session: ${JSON.stringify(result.err)}`);
+      console.log(`[SessionClient] Delete session result:`, success);
+      
+      if (typeof success !== 'boolean') {
+        console.error('[SessionClient] Unexpected response format from deleteSession:', success);
+        throw new Error('Unexpected response format from canister');
       }
       
-      return result.ok === true;
+      return success;
     } catch (error) {
       console.error(`[SessionClient] Error deleting session ${sessionId}:`, error);
       throw new Error(`Failed to delete session: ${formatError(error)}`);
     }
   }
 
-  public async joinSession(sessionId: string): Promise<Session> {
+  public async joinSession(sessionId: string): Promise<{ session: Session; isModerator: boolean }> {
+    console.log('[SessionClient] joinSession called with sessionId:', sessionId);
+    
     if (!this.currentIdentity) {
-      throw new Error('Must be authenticated to join a session');
+        throw new Error('Must be authenticated to join a session');
+    }
+
+    if (!sessionId) {
+        throw new Error('Session ID is required to join a session');
     }
 
     try {
-      const actor = await this.getActor(true);
-      const result = await (actor as any).joinSession(sessionId);
-      
-      if (!result || !('ok' in result) || !result.ok) {
-        throw new Error('Failed to join session');
-      }
-
-      return this.normalizeSession(result.ok);
-    } catch (error) {
-      console.error(`[SessionClient] Error joining session ${sessionId}:`, error);
-      throw new Error(`Failed to join session: ${formatError(error)}`);
+        console.log(`[SessionClient] Getting actor for session ${sessionId}`);
+        const actor = await this.getActor();
+        
+        console.log(`[SessionClient] Calling joinSession on canister for session ${sessionId}`);
+        const response = await (actor as any).joinSession(sessionId);
+        
+        console.log('[SessionClient] Raw response from canister:', response);
+        
+        // Handle different response formats
+        if (!response || typeof response !== 'object') {
+            throw new Error('Invalid response format from server');
+        }
+        
+        // Handle error response from Motoko's Result type
+        if ('err' in response) {
+            throw new Error(response.err || 'Unknown error occurred');
+        }
+        
+        // Handle successful response from Motoko's Result type
+        if ('ok' in response) {
+            const result = response.ok;
+            if (!result || typeof result !== 'object') {
+                throw new Error('Invalid response format: expected object with session and isModerator');
+            }
+            
+            const { session: sessionData, isModerator } = result;
+            
+            if (!sessionData) {
+                throw new Error('No session data in response');
+            }
+            
+            // Ensure the session has an ID - use the provided sessionId if missing
+            const sessionWithId = {
+                ...sessionData,
+                id: sessionData.id || sessionId
+            };
+            
+            console.log('[SessionClient] Session with ensured ID:', sessionWithId);
+            
+            // Create a minimal valid session with all required fields
+            const safeSession: Session = {
+                id: sessionWithId.id,
+                title: sessionWithId.title || 'Untitled Session',
+                description: sessionWithId.description || '',
+                sessionType: sessionWithId.sessionType || { video: null },
+                scheduledTime: typeof sessionWithId.scheduledTime === 'bigint' 
+                    ? sessionWithId.scheduledTime 
+                    : BigInt(sessionWithId.scheduledTime || 0),
+                duration: sessionWithId.duration ? Number(sessionWithId.duration) : 60,
+                maxAttendees: sessionWithId.maxAttendees ? Number(sessionWithId.maxAttendees) : 10,
+                host: sessionWithId.host?.toString() || '',
+                hostName: sessionWithId.hostName || 'Host',
+                hostAvatar: sessionWithId.hostAvatar || '',
+                status: sessionWithId.status || { scheduled: null },
+                attendees: Array.isArray(sessionWithId.attendees) 
+                    ? sessionWithId.attendees.map((p: any) => p?.toString?.() || '')
+                    : [],
+                createdAt: typeof sessionWithId.createdAt === 'bigint' 
+                    ? sessionWithId.createdAt 
+                    : BigInt(sessionWithId.createdAt || 0),
+                updatedAt: typeof sessionWithId.updatedAt === 'bigint' 
+                    ? sessionWithId.updatedAt 
+                    : BigInt(sessionWithId.updatedAt || 0),
+                recordingInfo: sessionWithId.recordingInfo || null,
+                meetingUrl: sessionWithId.meetingUrl || `https://meet.jit.si/peerverse-${sessionWithId.id}`,
+                jitsiRoomName: sessionWithId.jitsiRoomName || `peerverse-${sessionWithId.id}`,
+                jitsiConfig: sessionWithId.jitsiConfig || {
+                    roomName: `peerverse-${sessionWithId.id}`,
+                    displayName: 'User',
+                    email: null,
+                    avatarUrl: null,
+                    moderator: false,
+                    startWithAudioMuted: false,
+                    startWithVideoMuted: false,
+                    enableRecording: true,
+                    enableScreenSharing: true,
+                    enableChat: true,
+                    maxParticipants: null
+                },
+                tags: Array.isArray(sessionWithId.tags) ? sessionWithId.tags : [],
+                isRecordingEnabled: sessionWithId.isRecordingEnabled !== undefined ? sessionWithId.isRecordingEnabled : false,
+                actualStartTime: sessionWithId.actualStartTime || null,
+                actualEndTime: sessionWithId.actualEndTime || null,
+                participantCount: sessionWithId.participantCount !== undefined ? 
+                    Number(sessionWithId.participantCount) : 
+                    (Array.isArray(sessionWithId.attendees) ? sessionWithId.attendees.length : 0)
+            };
+            
+            console.log('[SessionClient] Safe session created:', safeSession);
+            
+            return {
+                session: safeSession,
+                isModerator: !!isModerator
+            };
+        }
+        
+        throw new Error('Unexpected response format from server');
+    } catch (error: unknown) {
+        console.error(`[SessionClient] Error joining session ${sessionId}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        throw new Error(`Failed to join session: ${errorMessage}`);
     }
-  }
+}
 
+// ...
   public async leaveSession(sessionId: string): Promise<Session> {
     if (!this.currentIdentity) {
       throw new Error('Must be authenticated to leave a session');

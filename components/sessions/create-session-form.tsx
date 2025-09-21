@@ -33,7 +33,8 @@ import {
 } from 'lucide-react';
 import { sessionClient } from '@/lib/session-client';
 import { useApiClients } from '@/lib/hooks/use-api-clients';
-import type { CreateSessionInput, JitsiConfig, SessionType } from '@/lib/session-client';
+import type { CreateSessionInput, SessionType } from '@/lib/session-client';
+import type { JitsiConfig } from '@/lib/ic/sessions';
 
 interface User {
   principal?: string;
@@ -138,6 +139,20 @@ const CreateSessionForm: React.FC<CreateSessionFormProps> = ({
       const scheduledTimeNs = BigInt(scheduledDateTime.getTime()) * 1_000_000n;
 
       // Create the session input with proper types
+      const jitsiConfig: [JitsiConfig] = [{
+        roomName: `peer-${Date.now()}`,
+        displayName: user.email || 'Anonymous',
+        email: user.email ? [user.email] : [],
+        avatarUrl: user.avatar ? [user.avatar] : [],
+        moderator: true,
+        startWithAudioMuted: data.startWithAudioMuted || false,
+        startWithVideoMuted: data.startWithVideoMuted || false,
+        enableRecording: data.isRecordingEnabled || false,
+        enableScreenSharing: data.enableScreenSharing !== false,
+        enableChat: data.enableChat !== false,
+        maxParticipants: data.maxAttendees ? [BigInt(data.maxAttendees)] : []
+      }];
+
       const sessionInput: CreateSessionInput = {
         title: data.title,
         description: data.description || '',
@@ -149,21 +164,7 @@ const CreateSessionForm: React.FC<CreateSessionFormProps> = ({
         hostAvatar: user.avatar || '',
         tags: data.tags || [],
         isRecordingEnabled: data.isRecordingEnabled || false,
-        recordSession: data.isRecordingEnabled || false,
-        jitsiConfig: [{
-          roomName: `peer-${Date.now()}`,
-          displayName: user.email || 'Anonymous',
-          email: user.email ? [user.email] : [],
-          avatarUrl: user.avatar ? [user.avatar] : [],
-          moderator: true,
-          startWithAudioMuted: data.startWithAudioMuted || false,
-          startWithVideoMuted: data.startWithVideoMuted || false,
-          enableRecording: data.isRecordingEnabled || false,
-          enableScreenSharing: data.enableScreenSharing !== false,
-          enableChat: data.enableChat !== false,
-          maxParticipants: data.maxAttendees ? [BigInt(data.maxAttendees)] : []
-        }] as [JitsiConfig],
-        isPrivate: data.isPrivate || false
+        jitsiConfig
       };
 
       // Create the session

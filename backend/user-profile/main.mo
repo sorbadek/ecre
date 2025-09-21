@@ -1,5 +1,4 @@
 import Principal "mo:base/Principal";
-import HashMap "mo:base/HashMap";
 import Array "mo:base/Array";
 import Time "mo:base/Time";
 import Result "mo:base/Result";
@@ -10,24 +9,35 @@ import Buffer "mo:base/Buffer";
 import Iter "mo:base/Iter";
 import Option "mo:base/Option";
 import Debug "mo:base/Debug";
+import StableHashMap "mo:StableHashMap";
 
-actor UserProfile {
+persistent actor UserProfile {
     // Types
     public type UserProfile = {
         id: Principal;
         name: Text;
         email: Text;
         bio: Text;
+        location: ?Text;
+        jobTitle: ?Text;
+        company: ?Text;
+        education: ?Text;
         avatarUrl: Text;
         coverUrl: Text;
         xpBalance: Nat;
         reputation: Nat;
+        skills: [Text];
         interests: [Text];
-        socialLinks: [(Text, Text)]; // (platform, url)
+        socialLinks: [SocialLink];
         settings: UserSettings;
         files: [UserFile];
         createdAt: Int;
         updatedAt: Int;
+    };
+
+    public type SocialLink = {
+        platform: Text;
+        url: Text;
     };
 
     public type UserSettings = {
@@ -64,25 +74,50 @@ actor UserProfile {
         name: ?Text;
         email: ?Text;
         bio: ?Text;
+        location: ?Text;
+        jobTitle: ?Text;
+        company: ?Text;
+        education: ?Text;
         avatarUrl: ?Text;
         coverUrl: ?Text;
+        skills: ?[Text];
         interests: ?[Text];
-        socialLinks: ?[(Text, Text)];
-        settings: ?UserSettings;
+        socialLinks: ?[SocialLink];
+        settings: ?UserSettingsUpdate;
     };
 
-    // State
-    private stable var profileEntries: [(Principal, UserProfile)] = [];
-    private var profiles = HashMap.fromIter<Principal, UserProfile>(profileEntries.vals(), 10, Principal.equal, Principal.hash);
+    public type UserSettingsUpdate = {
+        theme: ?Text;
+        notifications: ?Bool;
+        privacy: ?Text;
+        language: ?Text;
+        emailNotifications: ?Bool;
+        profileVisibility: ?Text;
+    };
 
+    // Stable state for persistence across upgrades
+    private stable let PROFILE_MAP_SIZE = 1000;
+    private stable let TRANSACTION_MAP_SIZE = 10000;
+    private stable let FILE_MAP_SIZE = 10000;
+    
+    // Stable storage for profiles
+    private stable var profilesEntries: [(Principal, UserProfile)] = [];
+    private var profiles = StableHashMap.StableHashMap<Principal, UserProfile>(PROFILE_MAP_SIZE, Principal.equal, Principal.hash);
+    
+    // Stable storage for XP transactions
     private stable var xpTransactionEntries: [(Text, XPTransaction)] = [];
-    private var xpTransactions = HashMap.fromIter<Text, XPTransaction>(xpTransactionEntries.vals(), 100, Text.equal, Text.hash);
-
+    private var xpTransactions = StableHashMap.StableHashMap<Text, XPTransaction>(TRANSACTION_MAP_SIZE, Text.equal, Text.hash);
+    
+    // Stable storage for user files
     private stable var userFileEntries: [(Text, UserFile)] = [];
-    private var userFiles = HashMap.fromIter<Text, UserFile>(userFileEntries.vals(), 100, Text.equal, Text.hash);
-
+    private var userFiles = StableHashMap.StableHashMap<Text, UserFile>(FILE_MAP_SIZE, Text.equal, Text.hash);
+    
+    // Counters
     private stable var nextTransactionId: Nat = 0;
     private stable var nextFileId: Nat = 0;
+    
+    // With enhanced orthogonal persistence, we don't need manual upgrade hooks
+    // as the runtime automatically handles state persistence across upgrades
 
     // Helper functions
     private func generateTransactionId(): Text {
@@ -113,16 +148,21 @@ actor UserProfile {
                     name = name;
                     email = email;
                     bio = "";
+                    location = null;
+                    jobTitle = null;
+                    company = null;
+                    education = null;
                     avatarUrl = "";
                     coverUrl = "";
                     xpBalance = 0;
                     reputation = 0;
+                    skills = [];
                     interests = [];
                     socialLinks = [];
                     settings = {
                         notifications = true;
                         privacy = "public";
-                        theme = "auto";
+                        theme = "light";
                         language = "en";
                         emailNotifications = true;
                         profileVisibility = "public";
@@ -133,6 +173,23 @@ actor UserProfile {
                 };
                 profiles.put(caller, profile);
                 #ok(profile)
+            };
+        }
+    };
+
+    // Helper function to update nested settings
+    private func updateSettings(current: UserSettings, update: ?UserSettingsUpdate) : UserSettings {
+        switch(update) {
+            case (null) { current };
+            case (?u) {
+                {
+                    theme = Option.get(u.theme, current.theme);
+                    notifications = Option.get(u.notifications, current.notifications);
+                    privacy = Option.get(u.privacy, current.privacy);
+                    language = Option.get(u.language, current.language);
+                    emailNotifications = Option.get(u.emailNotifications, current.emailNotifications);
+                    profileVisibility = Option.get(u.profileVisibility, current.profileVisibility);
+                }
             };
         }
     };
@@ -148,13 +205,18 @@ actor UserProfile {
                     name = Option.get(update.name, profile.name);
                     email = Option.get(update.email, profile.email);
                     bio = Option.get(update.bio, profile.bio);
+                    location = update.location;
+                    jobTitle = update.jobTitle;
+                    company = update.company;
+                    education = update.education;
                     avatarUrl = Option.get(update.avatarUrl, profile.avatarUrl);
                     coverUrl = Option.get(update.coverUrl, profile.coverUrl);
                     xpBalance = profile.xpBalance;
                     reputation = profile.reputation;
+                    skills = Option.get(update.skills, profile.skills);
                     interests = Option.get(update.interests, profile.interests);
                     socialLinks = Option.get(update.socialLinks, profile.socialLinks);
-                    settings = Option.get(update.settings, profile.settings);
+                    settings = updateSettings(profile.settings, update.settings);
                     files = profile.files;
                     createdAt = profile.createdAt;
                     updatedAt = getCurrentTime();
@@ -324,6 +386,101 @@ actor UserProfile {
         })
     };
 
+    // Social Links Management
+    public shared(msg) func addSocialLink(platform: Text, url: Text) : async Result.Result<[SocialLink], Text> {
+        let caller = msg.caller;
+        
+        switch (profiles.get(caller)) {
+            case null { #err("Profile not found") };
+            case (?profile) {
+                let newLink: SocialLink = { platform = platform; url = url };
+                let updatedLinks = Buffer.fromArray<SocialLink>(profile.socialLinks);
+                updatedLinks.add(newLink);
+                
+                let updatedProfile: UserProfile = {
+                    profile with 
+                    socialLinks = Buffer.toArray(updatedLinks);
+                    updatedAt = getCurrentTime();
+                };
+                
+                profiles.put(caller, updatedProfile);
+                #ok(updatedProfile.socialLinks)
+            };
+        }
+    };
+
+    public shared(msg) func removeSocialLink(platform: Text) : async Result.Result<[SocialLink], Text> {
+        let caller = msg.caller;
+        
+        switch (profiles.get(caller)) {
+            case null { #err("Profile not found") };
+            case (?profile) {
+                let updatedLinks = Buffer.fromArray<SocialLink>(profile.socialLinks);
+                let filteredLinks = Buffer.filter<SocialLink>(
+                    updatedLinks,
+                    func(link) { link.platform != platform }
+                );
+                
+                let updatedProfile: UserProfile = {
+                    profile with 
+                    socialLinks = Buffer.toArray(filteredLinks);
+                    updatedAt = getCurrentTime();
+                };
+                
+                profiles.put(caller, updatedProfile);
+                #ok(updatedProfile.socialLinks)
+            };
+        }
+    };
+
+    // Skills Management
+    public shared(msg) func addSkill(skill: Text) : async Result.Result<[Text], Text> {
+        let caller = msg.caller;
+        
+        switch (profiles.get(caller)) {
+            case null { #err("Profile not found") };
+            case (?profile) {
+                let skills = Buffer.fromArray<Text>(profile.skills);
+                if (Buffer.contains<Text>(skills, skill, Text.equal)) {
+                    #err("Skill already exists")
+                } else {
+                    skills.add(skill);
+                    let updatedProfile: UserProfile = {
+                        profile with 
+                        skills = Buffer.toArray(skills);
+                        updatedAt = getCurrentTime();
+                    };
+                    profiles.put(caller, updatedProfile);
+                    #ok(updatedProfile.skills)
+                }
+            };
+        }
+    };
+
+    public shared(msg) func removeSkill(skill: Text) : async Result.Result<[Text], Text> {
+        let caller = msg.caller;
+        
+        switch (profiles.get(caller)) {
+            case null { #err("Profile not found") };
+            case (?profile) {
+                let skills = Buffer.fromArray<Text>(profile.skills);
+                let filteredSkills = Buffer.filter<Text>(
+                    skills,
+                    func(s) { s != skill }
+                );
+                
+                let updatedProfile: UserProfile = {
+                    profile with 
+                    skills = Buffer.toArray(filteredSkills);
+                    updatedAt = getCurrentTime();
+                };
+                
+                profiles.put(caller, updatedProfile);
+                #ok(updatedProfile.skills)
+            };
+        }
+    };
+
     // File Management
     public shared(msg) func uploadFile(
         filename: Text,
@@ -448,47 +605,7 @@ actor UserProfile {
         }
     };
 
-    // Social Features
-    public shared(msg) func addSocialLink(platform: Text, url: Text) : async Result.Result<UserProfile, Text> {
-        let caller = msg.caller;
-        
-        switch (profiles.get(caller)) {
-            case null { #err("Profile not found") };
-            case (?profile) {
-                let newLink = (platform, url);
-                let updatedLinks = Array.append(profile.socialLinks, [newLink]);
-                
-                let updatedProfile: UserProfile = {
-                    profile with 
-                    socialLinks = updatedLinks;
-                    updatedAt = getCurrentTime();
-                };
-                profiles.put(caller, updatedProfile);
-                #ok(updatedProfile)
-            };
-        }
-    };
-
-    public shared(msg) func removeSocialLink(platform: Text) : async Result.Result<UserProfile, Text> {
-        let caller = msg.caller;
-        
-        switch (profiles.get(caller)) {
-            case null { #err("Profile not found") };
-            case (?profile) {
-                let updatedLinks = Array.filter(profile.socialLinks, func((p, _): (Text, Text)) : Bool {
-                    p != platform
-                });
-                
-                let updatedProfile: UserProfile = {
-                    profile with 
-                    socialLinks = updatedLinks;
-                    updatedAt = getCurrentTime();
-                };
-                profiles.put(caller, updatedProfile);
-                #ok(updatedProfile)
-            };
-        }
-    };
+    // Social Features - Using the implementation from earlier in the file that returns [SocialLink]
 
     // Analytics and Stats
     public query func getTotalUsers() : async Nat {
@@ -543,20 +660,29 @@ actor UserProfile {
         userFileEntries := [];
     };
 
-    // Admin functions (only for canister owner)
-    public shared(msg) func resetUserXP(userId: Principal) : async Result.Result<Bool, Text> {
-        // In a real implementation, you'd check if msg.caller is an admin
-        switch (profiles.get(userId)) {
-            case null { #err("User not found") };
+    // User self-service function to reset own XP
+    public shared(msg) func resetUserXP() : async Result.Result<Bool, Text> {
+        let caller = msg.caller;
+        
+        switch (profiles.get(caller)) {
+            case null { #err("User profile not found") };
             case (?profile) {
                 let updatedProfile: UserProfile = {
                     profile with 
                     xpBalance = 0;
                     updatedAt = getCurrentTime();
                 };
-                profiles.put(userId, updatedProfile);
+                profiles.put(caller, updatedProfile);
                 #ok(true)
             };
+        }
+    };
+
+    // Function to get current user's XP balance
+    public shared query(msg) func getMyXPBalance() : async Nat {
+        switch (profiles.get(msg.caller)) {
+            case (?profile) { profile.xpBalance };
+            case null { 0 };
         }
     };
 

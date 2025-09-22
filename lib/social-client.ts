@@ -30,18 +30,21 @@ export interface PartnerRequest {
 }
 
 export interface StudyGroup {
-  id: string
-  name: string
-  description: string
-  memberCount: number
-  maxMembers: number
-  isPublic: boolean
-  tags: string[]
-  createdAt: bigint
-  isMember: boolean
-  owner: string
-  creator?: string
-  members?: string[]
+  id: string;
+  name: string;
+  description: string;
+  createdBy: string;  // Principal as string
+  members: string[];  // Array of principal strings
+  maxMembers: number;
+  isPublic: boolean;
+  tags: string[];
+  createdAt: bigint;  // ns since epoch
+  lastActivity: bigint; // ns since epoch
+  // Computed properties (not part of the canister type)
+  memberCount: number;
+  isMember: boolean;
+  owner: string;      // Alias for createdBy
+  creator?: string;   // Alias for createdBy (backward compatibility)
 }
 
 class SocialClient {
@@ -301,20 +304,28 @@ class SocialClient {
         const members = group.members || [];
         const creator = group.creator?.toString() || this.identity.getPrincipal().toString();
         
+        const createdBy = this.identity.getPrincipal().toString();
+        const now = BigInt(Date.now()) * 1_000_000n; // Current time in nanoseconds
+        
         return {
+          // Core fields from canister
           id: group.id.toString(),
           name: group.name,
           description: group.description,
+          createdBy,
+          members: members.map((m: Principal) => m.toString()),
+          maxMembers: Number(group.maxMembers) || 10,
+          isPublic: group.isPublic === true,
+          tags: group.tags || [],
+          createdAt: group.createdAt || now,
+          lastActivity: group.lastActivity || now,
+          
+          // Computed fields
           memberCount: members.length,
-          maxMembers: group.maxMembers,
-          isPublic: group.isPublic,
-          tags: group.tags,
-          createdAt: group.createdAt,
           isMember: true, // Creator is automatically a member
-          owner: creator,
-          creator,
-          members: members.map((m: Principal) => m.toString())
-        };
+          owner: createdBy,  // Alias for createdBy
+          creator,           // Alias for backward compatibility
+        } satisfies StudyGroup;
       } else {
         throw new Error(result.err)
       }
@@ -376,35 +387,61 @@ class SocialClient {
       const actor = await this.getActor();
       if (!actor) throw new Error("Actor not available");
       
-      // Use getPublicStudyGroups which is a query method and doesn't require authentication
-      const result = await actor.getPublicStudyGroups();
-        
-      if (!Array.isArray(result)) {
-        throw new Error("Unexpected response format from getPublicStudyGroups");
+      // Get all study groups and filter for public ones
+      const allGroups = await this.getAllStudyGroups();
+      return allGroups.filter(group => group.isPublic);
+    } catch (error) {
+      console.error("Error getting public study groups:", error);
+      // Fallback to empty array if there's an error
+      return [];
+    }
+  }
+
+  private async getAllStudyGroups(): Promise<StudyGroup[]> {
+    try {
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      
+      // Get all study groups from the canister
+      const groups = await actor.getPublicStudyGroups();
+      if (!Array.isArray(groups)) {
+        console.warn("Unexpected response format from getPublicStudyGroups");
+        return [];
       }
 
       const principalString = this.identity?.getPrincipal()?.toString() || '';
 
-      return result.map((group: any) => {
-        const members = group.members || [];
+      return groups.map((group: any) => {
+        // Convert Principal objects to strings
+        const members = group.members?.map((m: any) => m.toString()) || [];
+        const createdBy = group.createdBy?.toString() || '';
+        
+        // Convert ns to ms for JavaScript Date compatibility
+        const createdAt = group.createdAt ? Number(group.createdAt / 1_000_000n) : 0;
+        const lastActivity = group.lastActivity ? Number(group.lastActivity / 1_000_000n) : createdAt;
+        
         return {
-          id: group.id.toString(),
-          name: group.name,
-          description: group.description,
+          // Core fields from canister
+          id: group.id?.toString() || '',
+          name: group.name?.toString() || 'Unnamed Group',
+          description: group.description?.toString() || '',
+          createdBy,
+          members,
+          maxMembers: Number(group.maxMembers || 10),
+          isPublic: group.isPublic === true,
+          tags: group.tags?.map((t: any) => t.toString()) || [],
+          createdAt: group.createdAt || 0n,
+          lastActivity: group.lastActivity || group.createdAt || 0n,
+          
+          // Computed fields
           memberCount: members.length,
-          maxMembers: group.maxMembers,
-          isPublic: group.isPublic,
-          tags: group.tags || [],
-          createdAt: group.createdAt,
-          isMember: principalString ? members.some((m: Principal) => m.toString() === principalString) : false,
-          owner: group.creator?.toString() || '',
-          creator: group.creator?.toString(),
-          members: members.map((m: Principal) => m.toString())
-        };
+          isMember: principalString ? members.includes(principalString) : false,
+          owner: createdBy,  // Alias for createdBy
+          creator: createdBy // Alias for backward compatibility
+        } satisfies StudyGroup;
       });
     } catch (error) {
-      console.error("Error getting study groups:", error);
-      // Fallback to empty array if there's an error
+      console.error("Error getting all study groups:", error);
       return [];
     }
   }

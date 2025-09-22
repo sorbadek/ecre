@@ -22,7 +22,7 @@ type SessionService = _SERVICE & {
 
 // Constants
 // Get canister ID from environment variable or use default
-const DEFAULT_SESSIONS_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai";
+const DEFAULT_SESSIONS_CANISTER_ID = "emnyw-syaaa-aaaaa-qajoq-cai";
 const SESSIONS_CANISTER_ID = process.env.NEXT_PUBLIC_SESSIONS_CANISTER_ID || DEFAULT_SESSIONS_CANISTER_ID;
 
 // Use the IC replica directly

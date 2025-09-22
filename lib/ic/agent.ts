@@ -4,30 +4,30 @@ import { AuthClient } from "@dfinity/auth-client"
 import { idlFactory } from "@/lib/ic/learning-analytics.idl"
 
 // Configuration
-export const HOST = "http://127.0.0.1:4943" // Local replica
+export const HOST = "https://icp0.io" // Mainnet IC endpoint
 
-// Canister IDs
-export const LEARNING_ANALYTICS_CANISTER_ID = "bkyz2-fmaaa-aaaaa-qaaaq-cai"
-export const NOTIFICATIONS_CANISTER_ID = "bd3sg-teaaa-aaaaa-qaaba-cai"
-export const RECOMMENDATIONS_CANISTER_ID = "be2us-64aaa-aaaaa-qaabq-cai"
+// Canister IDs - Mainnet
+export const LEARNING_ANALYTICS_CANISTER_ID = "e2trx-sqaaa-aaaam-qdtrq-cai"
+export const NOTIFICATIONS_CANISTER_ID = "epua2-tyaaa-aaaam-qdtsa-cai"
+export const RECOMMENDATIONS_CANISTER_ID = "be2us-64aaa-aaaaa-qaabq-cai" // Update this after deployment
 export const SESSIONS_CANISTER_ID = "br5f7-7uaaa-aaaaa-qaaca-cai"
-export const SOCIAL_CANISTER_ID = "bw4dl-smaaa-aaaaa-qaacq-cai"
+export const SOCIAL_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai"
 export const USER_PROFILE_CANISTER_ID = "b77ix-eeaaa-aaaaa-qaada-cai"
+
+// Not needed for mainnet but keeping for reference
 export const CANDID_UI_CANISTER_ID = "by6od-j4aaa-aaaaa-qaadq-cai"
 
-export const LOCAL_CANDID_UI = `http://127.0.0.1:4943/?canisterId=${CANDID_UI_CANISTER_ID}&id=`
-
+// Mainnet canister IDs
 export const CANISTER_IDS = {
   LEARNING_ANALYTICS: LEARNING_ANALYTICS_CANISTER_ID,
   NOTIFICATIONS: NOTIFICATIONS_CANISTER_ID,
   RECOMMENDATIONS: RECOMMENDATIONS_CANISTER_ID,
   SESSIONS: SESSIONS_CANISTER_ID,
   SOCIAL: SOCIAL_CANISTER_ID,
-  USER_PROFILE: USER_PROFILE_CANISTER_ID,
-  CANDID_UI: CANDID_UI_CANISTER_ID
+  USER_PROFILE: USER_PROFILE_CANISTER_ID
+  // CANDID_UI is not needed for mainnet
 }
 
-// Shared agent instance
 let sharedAgent: HttpAgent | null = null
 let currentIdentity: Identity | null = null
 let authClientInstance: AuthClient | null = null
@@ -46,62 +46,42 @@ export const AUTH_CONFIG = {
   },
 }
 
-// Custom fetch with CBOR and CORS support
+// Custom fetch for direct IC mainnet communication
 export const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   // Create URL object from input
-  let requestUrl = new URL(input.toString());
-  const isLocal = typeof window !== 'undefined' && 
-    (window.location.hostname === 'localhost' || 
-     window.location.hostname === '127.0.0.1');
-
+  const requestUrl = new URL(input.toString());
+  
   // Create new headers object from init headers or empty object
   const headers = new Headers(init?.headers);
   
-  // Set default headers if not already set
-  if (!headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/cbor');
-  }
-  if (!headers.has('Accept')) {
-    headers.set('Accept', 'application/cbor');
-  }
+  // Set required headers for IC mainnet
+  headers.set('Content-Type', 'application/cbor');
+  headers.set('Accept', 'application/cbor');
 
-  // For local development, use the proxy for IC requests
-  if (isLocal && (requestUrl.hostname === '127.0.0.1' && requestUrl.port === '4943')) {
-    const proxyUrl = new URL('/api/ic-proxy', window.location.origin);
-    proxyUrl.searchParams.set('url', requestUrl.toString());
-    requestUrl = proxyUrl;
-    
-    // Remove CORS headers for the proxy request
-    headers.delete('Origin');
-  }
-
-  // Configure request init with proper CORS settings
+  // Configure request init for mainnet
   const requestInit: RequestInit = {
     ...init,
     headers,
-    mode: isLocal ? 'cors' : 'same-origin',
-    credentials: 'same-origin',
+    mode: 'cors',
+    credentials: 'omit',
+    cache: 'no-store'
   };
 
-  console.log('Making request to:', requestUrl.toString());
+  console.log('Making request to IC mainnet:', requestUrl.toString());
 
   try {
-    // Make the fetch request
+    // Make the fetch request directly to IC mainnet
     const response = await fetch(requestUrl.toString(), requestInit);
     
     // Handle non-OK responses
     if (!response.ok) {
-      // Check for CORS errors
-      if (response.type === 'opaque') {
-        throw new Error(`CORS error or network error occurred: ${response.status} ${response.statusText}`);
-      }
       const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      throw new Error(`IC mainnet error! status: ${response.status}, message: ${errorText}`);
     }
     
     return response;
   } catch (error) {
-    console.error('Fetch error:', error);
+    console.error('IC mainnet fetch error:', error);
     throw error;
   }
 };
@@ -128,13 +108,14 @@ export const getAgent = async (identity?: Identity): Promise<HttpAgent> => {
     fetch: customFetch,
   });
 
-  // Only fetch the root key in development
+  // In production, we don't fetch the root key as we're connecting to mainnet
   if (process.env.NODE_ENV !== 'production') {
+    console.warn('Running in development mode. For mainnet, ensure NODE_ENV is set to production');
+    // We still fetch root key in development for local development with dfx
     try {
       await agent.fetchRootKey();
     } catch (error) {
-      console.warn('Failed to fetch root key. Make sure the IC is running locally.');
-      throw error;
+      console.warn('Running in mainnet mode. Root key fetch not needed.');
     }
   }
 

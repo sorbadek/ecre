@@ -11,7 +11,7 @@ import Int "mo:base/Int";
 import Iter "mo:base/Iter";
 import Int32 "mo:base/Int32";
 
-actor SocialCanister {
+ persistent actor SocialCanister {
 
   // =========================
   // Types
@@ -68,11 +68,11 @@ actor SocialCanister {
   private stable var nextRequestId: Nat = 1;
   private stable var nextGroupId: Nat = 1;
 
-  private var profiles       = HashMap.HashMap<Principal, PartnerProfile>(10, Principal.equal, Principal.hash);
-  private var partnerships   = HashMap.HashMap<Principal, [Principal]>(10, Principal.equal, Principal.hash);
-  private var partnerRequests= HashMap.HashMap<Text, PartnerRequest>(10, Text.equal, Text.hash);
-  private var studyGroups    = HashMap.HashMap<Text, StudyGroup>(10, Text.equal, Text.hash);
-  private var userGroups     = HashMap.HashMap<Principal, [Text]>(10, Principal.equal, Principal.hash);
+  private transient var profiles       = HashMap.HashMap<Principal, PartnerProfile>(10, Principal.equal, Principal.hash);
+  private transient var partnerships   = HashMap.HashMap<Principal, [Principal]>(10, Principal.equal, Principal.hash);
+  private transient var partnerRequests= HashMap.HashMap<Text, PartnerRequest>(10, Text.equal, Text.hash);
+  private transient var studyGroups    = HashMap.HashMap<Text, StudyGroup>(10, Text.equal, Text.hash);
+  private transient var userGroups     = HashMap.HashMap<Principal, [Text]>(10, Principal.equal, Principal.hash);
 
   // =========================
   // Helpers

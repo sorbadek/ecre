@@ -4,7 +4,7 @@ import { idlFactory } from "./ic/social.idl"
 import { Principal } from "@dfinity/principal"
 import { getIdentity, customFetch } from "./ic/agent"
 
-const SOCIAL_CANISTER_ID = "bw4dl-smaaa-aaaaa-qaacq-cai"
+const SOCIAL_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai"
 
 export interface PartnerProfile {
   principal: string
@@ -69,6 +69,40 @@ class SocialClient {
     this.actor = null; // Reset actor so it's recreated with the new identity
   }
 
+  private _verifyCert() {
+    // No-op in production
+  }
+
+  private async customFetchWithBypass(input: RequestInfo | URL, init?: RequestInit) {
+    try {
+      // Handle both string URLs and Request objects
+      const url = new URL(
+        input instanceof Request ? input.url : input.toString(),
+        'https://ic0.app'
+      );
+      
+      console.log(`[SocialClient] Making request to: ${url.toString()}`, {
+        method: init?.method,
+        headers: init?.headers ? Object.fromEntries(new Headers(init.headers).entries()) : {}
+      });
+      
+      // Use the custom fetch from agent.ts which is configured for mainnet
+      const response = await customFetch(url, {
+        ...init,
+        headers: {
+          ...init?.headers,
+          'Content-Type': 'application/cbor',
+          'Accept': 'application/cbor'
+        }
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('[SocialClient] Error in custom fetch:', error);
+      throw error;
+    }
+  }
+
   private async getActor() {
     if (this.actor) return this.actor;
 
@@ -78,181 +112,32 @@ class SocialClient {
     }
 
     try {
-      if (!this.identity) {
-        throw new Error('No identity available. Please authenticate first.');
-      }
-
       const identity = this.identity;
       console.log('[SocialClient] Using identity principal:', identity.getPrincipal().toText());
 
-      // Determine if we're in a local development environment
-      const isLocal = typeof window !== "undefined" && 
-        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-      
-      // Use the same host configuration as the rest of the application
-      const host = isLocal 
-        ? "http://127.0.0.1:4943"  // Local replica port
-        : "https://ic0.app";
-
+      // Always use mainnet IC endpoint
+      const host = 'https://ic0.app';
       console.log('[SocialClient] Initializing with host:', host);
       console.log('[SocialClient] Using canister ID:', SOCIAL_CANISTER_ID);
 
-      // Create a custom fetch handler for local development
-      const customFetchWithBypass = async (input: RequestInfo | URL, init?: RequestInit) => {
-        try {
-          // Handle both string URLs and Request objects
-          const url = new URL(
-            input instanceof Request ? input.url : input.toString(),
-            typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:4943'
-          );
-          
-          // Fix double API version in path if it exists
-          if (url.pathname.includes('/v2/v3/')) {
-            url.pathname = url.pathname.replace('/v2/v3/', '/v2/');
-          }
-          
-          const isICApiCall = url.pathname.includes('/api/v2/');
-          const isLocal = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
-          const origin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:4943';
-          
-          // Prepare request headers
-          const requestHeaders = new Headers(init?.headers);
-          
-          // Always set the Origin header for CORS
-          requestHeaders.set('Origin', origin);
-          
-          // Add required headers for IC API calls
-          if (isICApiCall) {
-            requestHeaders.set('Content-Type', 'application/cbor');
-            requestHeaders.set('Accept', 'application/cbor');
-            
-            // For local development, add headers to bypass certificate validation
-            if (isLocal) {
-              // Add cache-busting for status endpoint
-              if (url.pathname.endsWith('/status')) {
-                url.searchParams.set('_', Date.now().toString());
-              }
-              
-              // Add IC-specific headers
-              requestHeaders.set('X-IC-Disable-Certificate-Validation', 'true');
-              requestHeaders.set('X-IC-Allow-Insecure-Requests', 'true');
-              
-              // For preflight requests, ensure we have the necessary headers
-              if (init?.method === 'OPTIONS') {
-                requestHeaders.set('Access-Control-Request-Method', init.method || 'GET');
-                requestHeaders.set('Access-Control-Request-Headers', 'content-type,authorization');
-              }
-            }
-          }
-          
-          // Prepare fetch options
-          const fetchOptions: RequestInit = {
-            ...init,
-            headers: requestHeaders,
-            mode: 'cors',
-            cache: 'no-cache',
-            credentials: isICApiCall ? 'include' : 'same-origin'
-          };
-          
-          // For local development, ensure we're not sending credentials to non-local endpoints
-          if (isLocal && !isICApiCall) {
-            delete (fetchOptions as any).credentials;
-          }
-          
-          console.log(`[SocialClient] Making request to: ${url.toString()}`, {
-            method: fetchOptions.method,
-            headers: Object.fromEntries(requestHeaders.entries()),
-            credentials: fetchOptions.credentials
-          });
-          
-          // Make the request through our custom fetch
-          const response = await customFetch(url, fetchOptions);
-          
-          // For local development, ensure CORS headers are set in the response
-          if (isLocal && isICApiCall) {
-            const responseHeaders = new Headers(response.headers);
-            responseHeaders.set('Access-Control-Allow-Origin', origin);
-            responseHeaders.set('Access-Control-Allow-Credentials', 'true');
-            
-            // Create a new response with the modified headers
-            if (response.body) {
-              return new Response(response.body, {
-                status: response.status,
-                statusText: response.statusText,
-                headers: responseHeaders
-              });
-            }
-          }
-          
-          return response;
-        } catch (error) {
-          console.error('[SocialClient] Error in custom fetch:', error);
-          throw error;
-        }
-      };
-
-      // Configure the HTTP agent
+      // Configure the HTTP agent with our custom fetch
       const agent = new HttpAgent({
         identity,
         host,
-        ...(isLocal ? { 
-          fetch: customFetchWithBypass,
-          // Disable all verification for local development
-          verifyQuerySignatures: false,
-          verifyUpdateCalls: false,
-          verifyTimeNanos: false,
-          // Use empty root key to bypass verification
-          rootKey: new Uint8Array(0),
-          // Additional options
-          callOptions: {
-            http_request_timeout_ms: 30000, // 30 second timeout
-          },
-          retryTimes: 2,
-          maxResponseBytes: 1024 * 1024 * 10, // 10MB
-        } : {})
+        fetch: this.customFetchWithBypass.bind(this)
       });
 
-      if (isLocal) {
-        try {
-          console.log('[SocialClient] Fetching root key...');
-          // First try to fetch the root key
-          await agent.fetchRootKey();
-          console.log('[SocialClient] Successfully fetched root key');
-        } catch (error) {
-          console.warn('[SocialClient] Failed to fetch root key, patching agent to bypass verification', error);
-          // If fetching fails, patch the agent to bypass verification
-         (agent as any)._verifyCert = async () => true;
-        }
-      }
+      console.log('[SocialClient] Creating actor...');
+      this.actor = Actor.createActor(idlFactory, {
+        agent,
+        canisterId: SOCIAL_CANISTER_ID,
+      });
 
-      try {
-        console.log('[SocialClient] Creating actor...');
-        // Create the actor with the configured agent
-        this.actor = Actor.createActor(idlFactory, {
-          agent,
-          canisterId: SOCIAL_CANISTER_ID,
-        });
-
-        // Test the actor with a simple query
-        if (isLocal) {
-          try {
-            console.log('[SocialClient] Testing actor connection...');
-            await this.actor.whoami();
-            console.log('[SocialClient] Actor connection test successful');
-          } catch (testError) {
-            console.warn('[SocialClient] Actor connection test failed, but continuing', testError);
-          }
-        }
-
-        return this.actor;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        console.error('[SocialClient] Failed to create actor:', error);
-        throw new Error(`Failed to initialize actor: ${errorMessage}`);
-      }
+      return this.actor;
     } catch (error) {
-      console.warn("Failed to create social actor:", error)
-      return null
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      console.error('[SocialClient] Failed to create actor:', error);
+      throw new Error(`Failed to initialize actor: ${errorMessage}`);
     }
   }
 
@@ -490,25 +375,18 @@ class SocialClient {
     try {
       const actor = await this.getActor();
       if (!actor) throw new Error("Actor not available");
-      if (!this.identity) throw new Error("Not authenticated");
-
-      const principal = this.identity.getPrincipal();
-      const principalString = principal.toString();
-
-      // Use getStudyGroups which is now defined in the IDL
-      const result = await actor.getStudyGroups();
+      
+      // Use getPublicStudyGroups which is a query method and doesn't require authentication
+      const result = await actor.getPublicStudyGroups();
         
       if (!Array.isArray(result)) {
-        throw new Error("Unexpected response format from getStudyGroups");
+        throw new Error("Unexpected response format from getPublicStudyGroups");
       }
 
+      const principalString = this.identity?.getPrincipal()?.toString() || '';
+
       return result.map((group: any) => {
-        const members = Array.isArray(group.members)
-          ? group.members.map((m: Principal) => m.toString())
-          : [];
-        const creator = group.creator?.toString() || principalString;
-        const isMember = members.includes(principalString);
-        
+        const members = group.members || [];
         return {
           id: group.id.toString(),
           name: group.name,
@@ -518,15 +396,16 @@ class SocialClient {
           isPublic: group.isPublic,
           tags: group.tags || [],
           createdAt: group.createdAt,
-          isMember,
-          owner: creator,
-          creator,
-          members
+          isMember: principalString ? members.some((m: Principal) => m.toString() === principalString) : false,
+          owner: group.creator?.toString() || '',
+          creator: group.creator?.toString(),
+          members: members.map((m: Principal) => m.toString())
         };
       });
     } catch (error) {
       console.error("Error getting study groups:", error);
-      throw error;
+      // Fallback to empty array if there's an error
+      return [];
     }
   }
 

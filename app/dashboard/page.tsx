@@ -49,7 +49,7 @@ import {
 import { XPPurchaseModal } from "@/components/xp-purchase-modal"
 import { notificationsClient, type Activity } from "@/lib/notifications-client"
 import { useApiClients } from "@/lib/use-api-clients"
-import { socialClient, type PartnerProfile } from "@/lib/social-client"
+import { socialClient, type PartnerProfile, type StudyGroup } from "@/lib/social-client"
 import { toast } from "sonner"
 import { LearningSessionTracker } from "@/components/learning-session"
 import { NotificationsPanel } from "@/components/notifications/notifications-panel"
@@ -93,6 +93,11 @@ const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
 
 export default function DashboardPage() {
   const { isAuthenticated, loading: authLoading } = useApiClients();
+  const [socialLoading, setSocialLoading] = useState(true);
+  const [partners, setPartners] = useState<PartnerProfile[]>([]);
+  const [studyGroups, setStudyGroups] = useState<StudyGroup[]>([]);
+  const [socialError, setSocialError] = useState<string | null>(null);
+  
   const { 
     weeklyStats, 
     courseStats, 
@@ -106,7 +111,6 @@ export default function DashboardPage() {
   const [weeklyData, setWeeklyData] = useState<any[]>([]);
   const [chartCourseProgress, setChartCourseProgress] = useState<ChartCourseProgress[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [partners, setPartners] = useState<PartnerProfile[]>([]);
   const [totalCourses, setTotalCourses] = useState(0);
 
   // Process weekly stats when they change
@@ -183,14 +187,33 @@ export default function DashboardPage() {
         const notifications = await notificationsClient.getActivities(5n);
         setActivities(notifications || []);
 
-        // Load learning partners
-        const partners = await socialClient.getMyPartners();
-        setPartners(partners || []);
+        // Load social data
+        const loadSocialData = async () => {
+          setSocialLoading(true);
+          setSocialError(null);
+          
+          try {
+            // Load study partners
+            const partnersData = await socialClient.getMyPartners();
+            setPartners(partnersData);
+            
+            // Load study groups
+            const groupsData = await socialClient.getStudyGroups();
+            setStudyGroups(groupsData);
+          } catch (error) {
+            console.error('Failed to load social data:', error);
+            setSocialError('Failed to load social data. Please try again later.');
+          } finally {
+            setSocialLoading(false);
+          }
+        };
+        
+        loadSocialData();
       } catch (error) {
         console.error("Error loading dashboard data:", error);
         toast.error("Failed to load dashboard data");
       } finally {
-        setLoading(false);
+        // setLoading(false);
       }
     };
 
@@ -231,6 +254,42 @@ export default function DashboardPage() {
     if (activityType.session_joined) return "text-purple-500"
     return "text-gray-500"
   }
+
+  const handleJoinGroup = async (groupId: string) => {
+    try {
+      await socialClient.joinStudyGroup(groupId);
+      // Update local state to reflect the change
+      setStudyGroups(groups => 
+        groups.map(group => 
+          group.id === groupId 
+            ? { ...group, isMember: true, memberCount: group.memberCount + 1 }
+            : group
+        )
+      );
+      toast.success('Successfully joined the study group');
+    } catch (error) {
+      console.error('Failed to join study group:', error);
+      toast.error('Failed to join study group. Please try again.');
+    }
+  };
+
+  const handleLeaveGroup = async (groupId: string) => {
+    try {
+      await socialClient.leaveStudyGroup(groupId);
+      // Update local state to reflect the change
+      setStudyGroups(groups => 
+        groups.map(group => 
+          group.id === groupId 
+            ? { ...group, isMember: false, memberCount: Math.max(0, group.memberCount - 1) }
+            : group
+        )
+      );
+      toast.success('Successfully left the study group');
+    } catch (error) {
+      console.error('Failed to leave study group:', error);
+      toast.error('Failed to leave study group. Please try again.');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20">
@@ -412,10 +471,12 @@ export default function DashboardPage() {
                 <CardTitle className="text-lg font-semibold">Learning Partners</CardTitle>
               </CardHeader>
               <CardContent>
-                {loading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+                {socialLoading ? (
+                  <div className="flex items-center justify-center p-4">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-500"></div>
                   </div>
+                ) : socialError ? (
+                  <div className="text-red-500 text-sm p-4">{socialError}</div>
                 ) : partners.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {partners.map((partner) => (

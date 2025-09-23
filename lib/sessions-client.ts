@@ -280,7 +280,7 @@ class SessionsClient {
 
   constructor(canisterId: string, agent?: HttpAgent) {
     this.agent = agent || new HttpAgent({
-      host: 'https://a4gq6-oaaaa-aaaab-qaa4q-cai.icp0.io'
+      host: 'https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io'
     });
 
     this.actor = Actor.createActor(sessionsIdl, {

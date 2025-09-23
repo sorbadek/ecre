@@ -116,6 +116,16 @@ An integrated token system to power participation and reward contributions.
 * Secure key management with hardware security module (HSM) integration.
 * Privacy-preserving authentication for all platform interactions.
 
+## 3.1 Candid Interfaces
+
+Access the backend canisters via their Candid interfaces:
+
+- **Learning Analytics**: [View Candid Interface](https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=g2fo5-yyaaa-aaaap-qqcvq-cai)
+- **Notifications**: [View Candid Interface](https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=gpc7q-zqaaa-aaaap-qqcwa-cai)
+- **Sessions**: [View Candid Interface](https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=gbasy-caaaa-aaaap-qqcxa-cai)
+- **Social**: [View Candid Interface](https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=ggbum-pyaaa-aaaap-qqcxq-cai)
+- **User Profile**: [View Candid Interface](https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=lbyh4-cqaaa-aaaap-qqd4a-cai)
+
 ## 4. Getting Started
 
 * Peerverse integrates **Jitsi** for live, peer-to-peer video sessions.

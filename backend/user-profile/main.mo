@@ -9,7 +9,7 @@ import Buffer "mo:base/Buffer";
 import Iter "mo:base/Iter";
 import Option "mo:base/Option";
 import Debug "mo:base/Debug";
-import StableHashMap "mo:StableHashMap";
+import HashMap "mo:base/HashMap";
 
 persistent actor UserProfile {
     // Types
@@ -102,19 +102,26 @@ persistent actor UserProfile {
     
     // Stable storage for profiles
     private stable var profilesEntries: [(Principal, UserProfile)] = [];
-    private var profiles = StableHashMap.StableHashMap<Principal, UserProfile>(PROFILE_MAP_SIZE, Principal.equal, Principal.hash);
+    private var profiles = HashMap.fromIter<Principal, UserProfile>(profilesEntries.vals(), PROFILE_MAP_SIZE, Principal.equal, Principal.hash);
     
     // Stable storage for XP transactions
     private stable var xpTransactionEntries: [(Text, XPTransaction)] = [];
-    private var xpTransactions = StableHashMap.StableHashMap<Text, XPTransaction>(TRANSACTION_MAP_SIZE, Text.equal, Text.hash);
+    private var xpTransactions = HashMap.fromIter<Text, XPTransaction>(xpTransactionEntries.vals(), TRANSACTION_MAP_SIZE, Text.equal, Text.hash);
     
     // Stable storage for user files
     private stable var userFileEntries: [(Text, UserFile)] = [];
-    private var userFiles = StableHashMap.StableHashMap<Text, UserFile>(FILE_MAP_SIZE, Text.equal, Text.hash);
+    private var userFiles = HashMap.fromIter<Text, UserFile>(userFileEntries.vals(), FILE_MAP_SIZE, Text.equal, Text.hash);
+    
+    // System functions for stable storage
+    system func preupgrade() {
+        profilesEntries := Iter.toArray(profiles.entries());
+        xpTransactionEntries := Iter.toArray(xpTransactions.entries());
+        userFileEntries := Iter.toArray(userFiles.entries());
+    }
     
     // Counters
-    private stable var nextTransactionId: Nat = 0;
-    private stable var nextFileId: Nat = 0;
+    private stable var nextTransactionId : Nat = 0;
+    private stable var nextFileId : Nat = 0;
     
     // With enhanced orthogonal persistence, we don't need manual upgrade hooks
     // as the runtime automatically handles state persistence across upgrades

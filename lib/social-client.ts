@@ -4,7 +4,7 @@ import { idlFactory } from "./ic/social.idl"
 import { Principal } from "@dfinity/principal"
 import { getIdentity, customFetch } from "./ic/agent"
 
-const SOCIAL_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai"
+const SOCIAL_CANISTER_ID = "ggbum-pyaaa-aaaap-qqcxq-cai"
 
 export interface PartnerProfile {
   principal: string

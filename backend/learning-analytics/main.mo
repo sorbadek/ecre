@@ -11,20 +11,20 @@ import Iter "mo:base/Iter";
 import Debug "mo:base/Debug";
 import Float "mo:base/Float";
 
-actor LearningAnalytics {
+persistent actor LearningAnalytics {
     // Types
     public type LearningSession = {
         id: Text;
         userId: Principal;
         contentId: Text;
-        contentType: Text; // "course", "session", "tutorial", "project"
+        contentType: Text; 
         startTime: Int;
         endTime: ?Int;
-        duration: Int; // in minutes (Int)
+        duration: Int; 
         completed: Bool;
-        progress: Nat; // percentage 0-100
+        progress: Nat; 
         xpEarned: Int;
-        date: Text; // YYYY-MM-DD format
+        date: Text; 
     };
 
     public type CourseProgress = {
@@ -70,13 +70,13 @@ actor LearningAnalytics {
 
     // Stable storage arrays for upgrade
     private stable var sessionEntries: [(Text, LearningSession)] = [];
-    private var sessions = HashMap.fromIter<Text, LearningSession>(Iter.fromArray(sessionEntries), 100, Text.equal, Text.hash);
+    private transient var sessions = HashMap.fromIter<Text, LearningSession>(Iter.fromArray(sessionEntries), 100, Text.equal, Text.hash);
 
     private stable var progressEntries: [(Text, CourseProgress)] = [];
-    private var courseProgress = HashMap.fromIter<Text, CourseProgress>(Iter.fromArray(progressEntries), 50, Text.equal, Text.hash);
+    private transient var courseProgress = HashMap.fromIter<Text, CourseProgress>(Iter.fromArray(progressEntries), 50, Text.equal, Text.hash);
 
     private stable var activityEntries: [(Text, DailyActivity)] = [];
-    private var dailyActivities = HashMap.fromIter<Text, DailyActivity>(Iter.fromArray(activityEntries), 200, Text.equal, Text.hash);
+    private transient var dailyActivities = HashMap.fromIter<Text, DailyActivity>(Iter.fromArray(activityEntries), 200, Text.equal, Text.hash);
 
     private stable var nextSessionId: Nat = 0;
 

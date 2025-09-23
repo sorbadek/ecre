@@ -12,7 +12,7 @@ import Nat "mo:base/Nat";
 import Order "mo:base/Order";
 import Nat32 "mo:base/Nat32";
 
-actor NotificationsCanister {
+persistent actor NotificationsCanister {
     // Types
     public type ActivityType = {
         #comment;
@@ -50,9 +50,9 @@ actor NotificationsCanister {
 
     // State
     private stable var nextActivityId: Nat = 1;
-    private var activities = HashMap.HashMap<Text, Activity>(10, Text.equal, Text.hash);
-    private var userActivities = HashMap.HashMap<Principal, [Text]>(10, Principal.equal, Principal.hash);
-    private var preferences = HashMap.HashMap<Principal, NotificationPreferences>(10, Principal.equal, Principal.hash);
+    private transient var activities = HashMap.HashMap<Text, Activity>(10, Text.equal, Text.hash);
+    private transient var userActivities = HashMap.HashMap<Principal, [Text]>(10, Principal.equal, Principal.hash);
+    private transient var preferences = HashMap.HashMap<Principal, NotificationPreferences>(10, Principal.equal, Principal.hash);
 
     // Helper functions
     private func generateId(): Text {

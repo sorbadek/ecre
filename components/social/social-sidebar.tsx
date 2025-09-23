@@ -40,66 +40,58 @@ export interface PartnerProfile {
   interests?: string[]
 }
 
-export interface StudyGroup {
-  id: string
-  name: string
-  description: string
-  memberCount: number
-  maxMembers: number
-  isPublic: boolean
-  tags: string[]
-  createdAt: number
-  isMember: boolean
-  owner: string
-}
+// Import the StudyGroup type from social-client to ensure type consistency
+type StudyGroup = import('@/lib/social-client').StudyGroup
 
 export function SocialSidebar() {
   const [activeTab, setActiveTab] = useState<TabType>('partners')
   const [searchQuery, setSearchQuery] = useState('')
   const [partners, setPartners] = useState<PartnerProfile[]>([])
-  const [groups, setGroups] = useState<StudyGroup[]>([])
+  const [studyGroups, setStudyGroups] = useState<StudyGroup[]>([])
   const [discoverGroups, setDiscoverGroups] = useState<StudyGroup[]>([])
-  const [loading, setLoading] = useState(true)
   const [showAddPartner, setShowAddPartner] = useState(false)
   const [showCreateGroup, setShowCreateGroup] = useState(false)
+  // These states are now handled by showAddPartner and showCreateGroup
+  const [newPartnerPrincipal, setNewPartnerPrincipal] = useState('')
+  const [newPartnerMessage, setNewPartnerMessage] = useState('')
   const [newGroupData, setNewGroupData] = useState({
     name: '',
     description: '',
     maxMembers: 10,
     isPublic: true,
-    tags: ''
+    tags: [] as string[]
   })
-  const [newPartnerPrincipal, setNewPartnerPrincipal] = useState('')
+  const [newTag, setNewTag] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [pendingRequests, setPendingRequests] = useState<{id: string, from: string, message?: string}[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   
-  const { isAuthenticated } = useApiClients()
+  // Get the social client from the API clients hook
+  const { socialClient, isAuthenticated } = useApiClients()
 
   // Load social data
   useEffect(() => {
-    if (!isAuthenticated) return
-    
     const loadData = async () => {
+      if (!socialClient || !isAuthenticated) return;
+      
       try {
-        setLoading(true)
-        
-        // Load partners
-        const partnersData = await getMyPartners()
-        setPartners(partnersData || [])
-        
-        // Load groups
-        const groupsData = await getStudyGroups()
-        setGroups(groupsData?.filter((g: any) => g.isMember) || [])
-        setDiscoverGroups(groupsData?.filter((g: any) => !g.isMember) || [])
-        
+        setIsLoading(true)
+        const [partnersData, groupsData] = await Promise.all([
+          socialClient.getMyPartners(),
+          socialClient.getStudyGroups()
+        ])
+        setPartners(partnersData)
+        setStudyGroups(groupsData)
       } catch (error) {
-        console.error("Error loading social data:", error)
-        toast.error("Failed to load social data")
+        console.error('Error loading social data:', error)
+        toast.error('Failed to load social data')
       } finally {
-        setLoading(false)
+        setIsLoading(false)
       }
     }
     
     loadData()
-  }, [isAuthenticated])
+  }, [socialClient, isAuthenticated])
 
   // Handle adding a new partner
   const handleAddPartner = async () => {
@@ -121,12 +113,16 @@ export function SocialSidebar() {
     if (!newGroupData.name.trim()) return
     
     try {
-      await createStudyGroup(
+      if (!socialClient) {
+        throw new Error('Not authenticated. Please log in to create a study group.')
+      }
+      
+      await socialClient.createStudyGroup(
         newGroupData.name,
         newGroupData.description,
-        newGroupData.maxMembers,
         newGroupData.isPublic,
-        newGroupData.tags.split(',').map(tag => tag.trim()).filter(Boolean)
+        newGroupData.tags,
+        newGroupData.maxMembers
       )
       toast.success("Study group created!")
       setNewGroupData({
@@ -134,14 +130,13 @@ export function SocialSidebar() {
         description: '',
         maxMembers: 10,
         isPublic: true,
-        tags: ''
+        tags: []
       })
       setShowCreateGroup(false)
       
       // Refresh groups
-      const groupsData = await getStudyGroups()
-      setGroups(groupsData?.filter((g: any) => g.isMember) || [])
-      setDiscoverGroups(groupsData?.filter((g: any) => !g.isMember) || [])
+      const groupsData = await socialClient.getStudyGroups()
+      setStudyGroups(groupsData)
     } catch (error) {
       console.error("Error creating study group:", error)
       toast.error("Failed to create study group")
@@ -150,33 +145,47 @@ export function SocialSidebar() {
 
   // Handle joining a study group
   const handleJoinGroup = async (groupId: string) => {
+    if (!socialClient) {
+      toast.error('Not authenticated. Please log in to join a group.')
+      return
+    }
+    
     try {
-      await joinStudyGroup(groupId)
-      toast.success("Joined group!")
-      
-      // Update groups
-      const groupsData = await getStudyGroups()
-      setGroups(groupsData?.filter((g: any) => g.isMember) || [])
-      setDiscoverGroups(groupsData?.filter((g: any) => !g.isMember) || [])
+      await socialClient.joinStudyGroup(groupId)
+      setStudyGroups(groups => 
+        groups.map(group => 
+          group.id === groupId 
+            ? { ...group, isMember: true, memberCount: group.memberCount + 1 }
+            : group
+        )
+      )
+      toast.success('Successfully joined the group')
     } catch (error) {
-      console.error("Error joining group:", error)
-      toast.error("Failed to join group")
+      console.error('Error joining group:', error)
+      toast.error('Failed to join group')
     }
   }
 
   // Handle leaving a study group
   const handleLeaveGroup = async (groupId: string) => {
+    if (!socialClient) {
+      toast.error('Not authenticated. Please log in to leave a group.')
+      return
+    }
+    
     try {
-      await leaveStudyGroup(groupId)
-      toast.success("Left group")
-      
-      // Update groups
-      const groupsData = await getStudyGroups()
-      setGroups(groupsData?.filter((g: any) => g.isMember) || [])
-      setDiscoverGroups(groupsData?.filter((g: any) => !g.isMember) || [])
+      await socialClient.leaveStudyGroup(groupId)
+      setStudyGroups(groups => 
+        groups.map(group => 
+          group.id === groupId 
+            ? { ...group, isMember: false, memberCount: Math.max(0, group.memberCount - 1) }
+            : group
+        )
+      )
+      toast.success('Successfully left the group')
     } catch (error) {
-      console.error("Error leaving group:", error)
-      toast.error("Failed to leave group")
+      console.error('Error leaving group:', error)
+      toast.error('Failed to leave group')
     }
   }
 
@@ -187,16 +196,16 @@ export function SocialSidebar() {
     partner.skills?.some(skill => skill.toLowerCase().includes(searchQuery.toLowerCase()))
   )
 
-  const filteredGroups = groups.filter(group => 
+  const filteredGroups = studyGroups.filter(group => 
     group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     group.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    group.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+    (group.tags || []).some((tag: string) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
   )
 
-  const filteredDiscoverGroups = discoverGroups.filter(group => 
+  const filteredDiscoverGroups = (discoverGroups || []).filter(group => 
     group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     group.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    group.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+    (group.tags || []).some((tag: string) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
   )
 
   return (
@@ -300,12 +309,58 @@ export function SocialSidebar() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="tags">Tags (comma separated)</Label>
-                    <Input
-                      id="tags"
-                      placeholder="e.g., react, typescript, webdev"
-                      value={newGroupData.tags}
-                      onChange={(e) => setNewGroupData({...newGroupData, tags: e.target.value})}
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        id="new-tag"
+                        placeholder="Add a tag"
+                        value={newTag}
+                        onChange={(e) => setNewTag(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && newTag.trim()) {
+                            e.preventDefault();
+                            setNewGroupData({
+                              ...newGroupData,
+                              tags: [...newGroupData.tags, newTag.trim()]
+                            });
+                            setNewTag('');
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          if (newTag.trim()) {
+                            setNewGroupData({
+                              ...newGroupData,
+                              tags: [...newGroupData.tags, newTag.trim()]
+                            });
+                            setNewTag('');
+                          }
+                        }}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {newGroupData.tags.map((tag, index) => (
+                        <Badge key={index} variant="secondary" className="flex items-center gap-1">
+                          {tag}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewGroupData({
+                                ...newGroupData,
+                                tags: newGroupData.tags.filter((_, i) => i !== index)
+                              });
+                            }}
+                            className="ml-1 text-muted-foreground hover:text-foreground"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
                   </div>
                 </div>
                 <DialogFooter>

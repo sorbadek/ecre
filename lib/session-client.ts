@@ -22,7 +22,7 @@ type SessionService = _SERVICE & {
 
 // Constants
 // Get canister ID from environment variable or use default
-const DEFAULT_SESSIONS_CANISTER_ID = "emnyw-syaaa-aaaaa-qajoq-cai";
+const DEFAULT_SESSIONS_CANISTER_ID = "e6lpp-6iaaa-aaaaa-qajnq-cai";
 const SESSIONS_CANISTER_ID = process.env.NEXT_PUBLIC_SESSIONS_CANISTER_ID || DEFAULT_SESSIONS_CANISTER_ID;
 
 // Use the IC replica directly
@@ -830,6 +830,6 @@ export class SessionClient {
 export const sessionClient = SessionClient.getInstance();
 
 // Expose on window for debugging in development
-if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
   (window as any).sessionClient = sessionClient;
 }

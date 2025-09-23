@@ -81,11 +81,7 @@ An integrated token system to power participation and reward contributions.
 
 ## 3. Architecture Overview
 
-<div align="center">
-  <img src="./public/peerverse_architecture_v2.png" alt="PeerVerse Architecture" width="800"/>
-</div>
-
-Peerverse is designed as a fully onchain, decentralized learning ecosystem. Its architecture combines a modern web experience with blockchain-powered backend logic and decentralized infrastructure for media handling.
+<div align="center"><img src="./public/peerverse_architecture_v2.png" alt="PeerVerse Architecture" width="800"/> </div>Peerverse is designed as a fully onchain, decentralized learning ecosystem. Its architecture combines a modern web experience with blockchain-powered backend logic and decentralized infrastructure for media handling.
 
 ### 🖥️ Frontend – **Next.js**
 
@@ -196,9 +192,9 @@ Peerverse introduces a new way to learn, teach, and earn recognition, powered by
   * These records are **publicly verifiable** and can be used as proof of skills anywhere.
 
 
-## 5. Getting Started & Deployment
+# 5. **Getting Started & Deployment**
 
-### 👩‍🎓 For Users
+## 👩‍🎓 **For Users**
 
 Peerverse is built to make decentralized learning easy, even if you’re new to Web3.
 
@@ -228,43 +224,43 @@ Peerverse is built to make decentralized learning easy, even if you’re new to 
 
 ---
 
-### 👨‍💻 For Developers
+## 👨‍💻 For **Developers**
 
 Peerverse is open-source and welcomes contributors to improve the decentralized learning ecosystem.
 
-**1. Prerequisites**
+### **1. Prerequisites**
 
 * [Node.js](https://nodejs.org/) (v18+)
 * [DFX SDK](https://internetcomputer.org/docs/current/developer-docs/quickstart/dfx-install)
 * Git & npm/yarn
 * Basic understanding of **Motoko**
 
-**2. Clone the Repository**
+### **2. Clone the Repository**
 
 ```bash
 git clone https://github.com/sorbadek/ecre.git
-cd peerverse
+cd ecre
 ```
 
-**3. Install Dependencies**
+### **3. Install Dependencies**
 
 ```bash
 npm install --legacy-peer-deps
 ```
 
-**4. Start Local ICP Environment**
+### **4. Start Local ICP Environment**
 
 ```bash
 dfx start --background
 ```
 
-**5. Deploy Canisters Locally**
+### **5. Deploy Canisters Locally**
 
 ```bash
 dfx deploy
 ```
 
-**6. Run the Frontend (Next.js)**
+### **6. Run the Frontend (Next.js)**
 
 ```bash
 npm run dev
@@ -274,7 +270,7 @@ npm run dev
 
 ---
 
-### 🚀 Deployment
+## 🚀 **Deployment**
 
 Peerverse runs entirely on the **ICP ecosystem**. Deployment involves pushing both the **frontend** and **backend canisters** to the Internet Computer.
 

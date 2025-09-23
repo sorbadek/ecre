@@ -11,7 +11,7 @@ import Iter "mo:base/Iter";
 import Option "mo:base/Option";
 import Debug "mo:base/Debug";
 
-actor UserProfile {
+persistent actor UserProfile {
     // Types
     public type UserProfile = {
         id: Principal;
@@ -73,13 +73,13 @@ actor UserProfile {
 
     // State
     stable var profileEntries: [(Principal, UserProfile)] = [];
-    private var profiles = HashMap.fromIter<Principal, UserProfile>(profileEntries.vals(), 10, Principal.equal, Principal.hash);
+    private transient var profiles = HashMap.fromIter<Principal, UserProfile>(profileEntries.vals(), 10, Principal.equal, Principal.hash);
 
     stable var xpTransactionEntries: [(Text, XPTransaction)] = [];
-    private var xpTransactions = HashMap.fromIter<Text, XPTransaction>(xpTransactionEntries.vals(), 100, Text.equal, Text.hash);
+    private transient var xpTransactions = HashMap.fromIter<Text, XPTransaction>(xpTransactionEntries.vals(), 100, Text.equal, Text.hash);
 
     stable var userFileEntries: [(Text, UserFile)] = [];
-    private var userFiles = HashMap.fromIter<Text, UserFile>(userFileEntries.vals(), 100, Text.equal, Text.hash);
+    private transient var userFiles = HashMap.fromIter<Text, UserFile>(userFileEntries.vals(), 100, Text.equal, Text.hash);
 
     stable var nextTransactionId: Nat = 0;
     stable var nextFileId: Nat = 0;

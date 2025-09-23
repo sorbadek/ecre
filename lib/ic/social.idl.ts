@@ -1,67 +1,82 @@
-export const idlFactory = ({ IDL }: any) => {
+export const idlFactory = ({ IDL }) => {
+
   const OnlineStatus = IDL.Variant({
     online: IDL.Null,
     away: IDL.Null,
-    offline: IDL.Null,
-  })
+    offline: IDL.Null
+  });
 
   const PartnerProfile = IDL.Record({
     principal: IDL.Principal,
     name: IDL.Text,
     role: IDL.Text,
     xp: IDL.Nat,
-    onlineStatus: OnlineStatus,
-    avatarColor: IDL.Text,
     initials: IDL.Text,
-    joinedAt: IDL.Int,
+    avatarColor: IDL.Text,
+    onlineStatus: OnlineStatus,
     lastActive: IDL.Int,
-  })
+    studyStreak: IDL.Nat,
+    completedCourses: IDL.Nat
+  });
 
   const PartnerRequest = IDL.Record({
     id: IDL.Text,
-    from: IDL.Principal,
-    to: IDL.Principal,
+    fromPrincipal: IDL.Principal,
+    toPrincipal: IDL.Principal,
+    fromName: IDL.Text,
     message: IDL.Opt(IDL.Text),
     timestamp: IDL.Int,
     status: IDL.Variant({
       pending: IDL.Null,
       accepted: IDL.Null,
-      declined: IDL.Null,
-    }),
-  })
+      declined: IDL.Null
+    })
+  });
 
   const StudyGroup = IDL.Record({
     id: IDL.Text,
     name: IDL.Text,
     description: IDL.Text,
-    creator: IDL.Principal,
+    createdBy: IDL.Principal,
     members: IDL.Vec(IDL.Principal),
     maxMembers: IDL.Nat,
     isPublic: IDL.Bool,
-    createdAt: IDL.Int,
     tags: IDL.Vec(IDL.Text),
-  })
+    createdAt: IDL.Int,
+    lastActivity: IDL.Int
+  });
 
-  const Result = IDL.Variant({ ok: IDL.Text, err: IDL.Text })
-  const Result_1 = IDL.Variant({ ok: PartnerRequest, err: IDL.Text })
-  const Result_2 = IDL.Variant({ ok: StudyGroup, err: IDL.Text })
+  const SocialStats = IDL.Record({
+    totalPartners: IDL.Nat,
+    activePartners: IDL.Nat,
+    studyGroups: IDL.Nat,
+    totalInteractions: IDL.Nat,
+    weeklyInteractions: IDL.Nat
+  });
+
+  const ResultPartnerProfile = IDL.Variant({ ok: PartnerProfile, err: IDL.Text });
+  const ResultPartnerRequest = IDL.Variant({ ok: PartnerRequest, err: IDL.Text });
+  const ResultStudyGroup = IDL.Variant({ ok: StudyGroup, err: IDL.Text });
+  const ResultText = IDL.Variant({ ok: IDL.Text, err: IDL.Text });
 
   return IDL.Service({
-    sendPartnerRequest: IDL.Func([IDL.Principal, IDL.Opt(IDL.Text)], [Result], []),
-    acceptPartnerRequest: IDL.Func([IDL.Text], [Result_1], []),
-    declinePartnerRequest: IDL.Func([IDL.Text], [Result_1], []),
-    getMyPartners: IDL.Func([], [IDL.Vec(PartnerProfile)], []),
-    getMyPartnersQuery: IDL.Func([], [IDL.Vec(PartnerProfile)], ["query"]),
-    getPartnerRequests: IDL.Func([], [IDL.Vec(PartnerRequest)], ["query"]),
-    createStudyGroup: IDL.Func([IDL.Text, IDL.Text, IDL.Nat, IDL.Bool, IDL.Vec(IDL.Text)], [Result_2], []),
-    joinStudyGroup: IDL.Func([IDL.Text], [Result], []),
-    leaveStudyGroup: IDL.Func([IDL.Text], [Result], []),
-    getMyStudyGroups: IDL.Func([], [IDL.Vec(StudyGroup)], ["query"]),
-    getPublicStudyGroups: IDL.Func([], [IDL.Vec(StudyGroup)], ["query"]),
-    getStudyGroups: IDL.Func([], [IDL.Vec(StudyGroup)], ["query"]),
-    generateSamplePartners: IDL.Func([], [Result], []),
-    updateOnlineStatus: IDL.Func([OnlineStatus], [Result], []),
-  })
+    'updateProfile': IDL.Func([IDL.Text, IDL.Text], [ResultPartnerProfile], []),
+    'getMyProfile': IDL.Func([], [IDL.Opt(PartnerProfile)], ['query']),
+    'getMyPartners': IDL.Func([], [IDL.Vec(PartnerProfile)], []),
+    'getMyPartnersQuery': IDL.Func([], [IDL.Vec(PartnerProfile)], ['query']),
+    'sendPartnerRequest': IDL.Func([IDL.Principal, IDL.Opt(IDL.Text)], [ResultPartnerRequest], []),
+    'acceptPartnerRequest': IDL.Func([IDL.Text], [ResultPartnerRequest], []),
+    'declinePartnerRequest': IDL.Func([IDL.Text], [ResultPartnerRequest], []),
+    'getPendingRequests': IDL.Func([], [IDL.Vec(PartnerRequest)], []),
+    'createStudyGroup': IDL.Func([IDL.Text, IDL.Text, IDL.Bool, IDL.Vec(IDL.Text), IDL.Nat], [ResultStudyGroup], []),
+    'joinStudyGroup': IDL.Func([IDL.Text], [ResultStudyGroup], []),
+    'getMyStudyGroups': IDL.Func([], [IDL.Vec(StudyGroup)], []),
+    'updateOnlineStatus': IDL.Func([OnlineStatus], [ResultPartnerProfile], []),
+    'recordInteraction': IDL.Func([IDL.Principal, IDL.Text], [ResultText], []),
+    'removePartner': IDL.Func([IDL.Principal], [ResultText], []),
+    'getSocialStats': IDL.Func([], [SocialStats], []),
+    'generateSamplePartners': IDL.Func([], [ResultText], [])
+  });
 }
 
 export const init = ({ IDL }: any) => {

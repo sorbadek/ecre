@@ -17,6 +17,43 @@ const kalam = Kalam({
 export const metadata: Metadata = {
   title: 'PeerVerse - Learn Together, Grow Forever',
   description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.png', type: 'image/png', sizes: '512x512' },
+    ],
+    apple: [
+      { url: '/apple-icon.png', type: 'image/png', sizes: '180x180' },
+    ],
+  },
+  manifest: '/site.webmanifest',
+  themeColor: '#ffffff',
+  openGraph: {
+    title: 'PeerVerse - Learn Together, Grow Forever',
+    description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
+    url: 'https://peer-verse.app',
+    siteName: 'PeerVerse',
+    images: [
+      {
+        url: '/og-image.jpg',
+        width: 1200,
+        height: 630,
+      },
+    ],
+    locale: 'en_US',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'PeerVerse - Learn Together, Grow Forever',
+    description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
+    images: ['/og-image.jpg'],
+  },
+  viewport: 'width=device-width, initial-scale=1, maximum-scale=5',
+  metadataBase: new URL('https://peer-verse.app'),
+  alternates: {
+    canonical: '/',
+  },
 }
 
 export default function RootLayout({

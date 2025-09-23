@@ -4,7 +4,7 @@ import { idlFactory } from "./ic/social.idl"
 import { Principal } from "@dfinity/principal"
 import { getIdentity, customFetch } from "./ic/agent"
 
-const SOCIAL_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai"
+const SOCIAL_CANISTER_ID = "ekhd5-baaaa-aaaac-qaitq-cai"
 
 export interface PartnerProfile {
   principal: string
@@ -289,49 +289,49 @@ class SocialClient {
   async createStudyGroup(
     name: string,
     description: string,
-    maxMembers: number,
     isPublic: boolean,
     tags: string[],
+    maxMembers: number
   ): Promise<StudyGroup> {
     try {
-      const actor = await this.getActor()
-      if (!actor) throw new Error("Actor not available")
-      if (!this.identity) throw new Error("Not authenticated")
-
-      const result = await actor.createStudyGroup(name, description, maxMembers, isPublic, tags)
-      if ("ok" in result) {
-        const group = result.ok;
-        const members = group.members || [];
-        const creator = group.creator?.toString() || this.identity.getPrincipal().toString();
-        
-        const createdBy = this.identity.getPrincipal().toString();
-        const now = BigInt(Date.now()) * 1_000_000n; // Current time in nanoseconds
-        
-        return {
-          // Core fields from canister
-          id: group.id.toString(),
-          name: group.name,
-          description: group.description,
-          createdBy,
-          members: members.map((m: Principal) => m.toString()),
-          maxMembers: Number(group.maxMembers) || 10,
-          isPublic: group.isPublic === true,
-          tags: group.tags || [],
-          createdAt: group.createdAt || now,
-          lastActivity: group.lastActivity || now,
-          
-          // Computed fields
-          memberCount: members.length,
-          isMember: true, // Creator is automatically a member
-          owner: createdBy,  // Alias for createdBy
-          creator,           // Alias for backward compatibility
-        } satisfies StudyGroup;
-      } else {
-        throw new Error(result.err)
-      }
+      const actor = await this.getActor();
+      if (!actor) throw new Error("Actor not available");
+      
+      // Convert values to the exact types expected by the backend
+      const nameStr = String(name);
+      const descriptionStr = String(description);
+      const isPublicNat = isPublic ? 1n : 0n; // Convert boolean to 1n or 0n for Nat
+      const tagsArray = Array.isArray(tags) ? tags.map(String) : [];
+      const maxMembersNat = BigInt(Math.max(1, Number(maxMembers) || 10));
+      
+      // Call the canister with explicit type casting to match the backend
+      const result = await (actor as any).createStudyGroup(
+        nameStr,
+        descriptionStr,
+        isPublicNat,  // Pass as BigInt (1n or 0n)
+        tagsArray,
+        maxMembersNat
+      );
+      
+      // Convert the result to a StudyGroup object
+      return {
+        id: result.id?.toString() || '',
+        name: result.name?.toString() || '',
+        description: result.description?.toString() || '',
+        createdBy: result.createdBy?.toString() || '',
+        members: Array.isArray(result.members) ? result.members.map((m: any) => m.toString()) : [],
+        maxMembers: result.maxMembers ? Number(result.maxMembers) : 10,
+        isPublic: result.isPublic === true || result.isPublic === 1 || result.isPublic === 1n,
+        tags: Array.isArray(result.tags) ? result.tags.map(String) : [],
+        createdAt: BigInt(result.createdAt || 0),
+        lastActivity: BigInt(result.lastActivity || 0),
+        memberCount: Array.isArray(result.members) ? result.members.length : 0,
+        isMember: false,
+        owner: result.owner?.toString() || result.createdBy?.toString() || ''
+      };
     } catch (error) {
-      console.error("Error creating study group:", error)
-      throw error
+      console.error("Error creating study group:", error);
+      throw error;
     }
   }
 
@@ -385,14 +385,42 @@ class SocialClient {
   async getStudyGroups(): Promise<StudyGroup[]> {
     try {
       const actor = await this.getActor();
-      if (!actor) throw new Error("Actor not available");
+      if (!actor) {
+        console.warn("Actor not available, cannot fetch study groups");
+        return [];
+      }
       
-      // Get all study groups and filter for public ones
-      const allGroups = await this.getAllStudyGroups();
-      return allGroups.filter(group => group.isPublic);
+      // First try to get the user's groups
+      let groups = [];
+      try {
+        const result = await actor.getMyStudyGroups();
+        if (Array.isArray(result)) {
+          groups = result;
+        }
+      } catch (error) {
+        console.warn("getMyStudyGroups not implemented, trying fallback");
+        // Fallback to empty array if not implemented
+        return [];
+      }
+      
+      // Convert the groups to the expected format
+      return groups.map((group: any) => ({
+        id: group.id?.toString() || '',
+        name: group.name?.toString() || 'Unnamed Group',
+        description: group.description?.toString() || '',
+        createdBy: group.createdBy?.toString() || '',
+        members: group.members?.map((m: any) => m.toString()) || [],
+        maxMembers: Number(group.maxMembers || 10),
+        isPublic: group.isPublic === true || group.isPublic === 1 || group.isPublic === 'true',
+        tags: Array.isArray(group.tags) ? group.tags.map(String) : [],
+        createdAt: group.createdAt ? Number(group.createdAt / 1_000_000n) : Date.now(),
+        lastActivity: group.lastActivity ? Number(group.lastActivity / 1_000_000n) : Date.now(),
+        memberCount: group.members?.length || 0,
+        isMember: group.members?.some((m: any) => m.toString() === this.identity?.getPrincipal()?.toString()) || false,
+        owner: group.owner?.toString() || group.createdBy?.toString() || '',
+      }));
     } catch (error) {
-      console.error("Error getting public study groups:", error);
-      // Fallback to empty array if there's an error
+      console.error("Error getting study groups:", error);
       return [];
     }
   }
@@ -403,10 +431,15 @@ class SocialClient {
       if (!actor) throw new Error("Actor not available");
       
       // Get all study groups from the canister
-      const groups = await actor.getPublicStudyGroups();
-      if (!Array.isArray(groups)) {
-        console.warn("Unexpected response format from getPublicStudyGroups");
-        return [];
+      // First try to get the user's groups, fall back to empty array if not implemented
+      let groups = [];
+      try {
+        const result = await actor.getMyStudyGroups();
+        if (Array.isArray(result)) {
+          groups = result;
+        }
+      } catch (error) {
+        console.warn("getMyStudyGroups not implemented, using empty array");
       }
 
       const principalString = this.identity?.getPrincipal()?.toString() || '';
@@ -511,11 +544,11 @@ export async function getStudyGroups(): Promise<StudyGroup[]> {
 export async function createStudyGroup(
   name: string,
   description: string,
-  maxMembers: number,
   isPublic: boolean,
-  tags: string[]
+  tags: string[],
+  maxMembers: number
 ): Promise<StudyGroup> {
-  return socialClient.createStudyGroup(name, description, maxMembers, isPublic, tags);
+  return socialClient.createStudyGroup(name, description, isPublic, tags, maxMembers);
 }
 
 export async function joinStudyGroup(groupId: string): Promise<void> {

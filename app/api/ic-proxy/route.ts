@@ -15,7 +15,7 @@ const corsHeaders = (origin: string | null) => {
   };
 
   // In development, allow all origins for easier testing
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV === 'production') {
     headers['Access-Control-Allow-Origin'] = origin || '*';
     return headers;
   }

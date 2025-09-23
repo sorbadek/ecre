@@ -7,11 +7,11 @@ import { idlFactory } from "@/lib/ic/learning-analytics.idl"
 export const HOST = "https://icp0.io" // Mainnet IC endpoint
 
 // Canister IDs - Mainnet
-export const LEARNING_ANALYTICS_CANISTER_ID = "e2trx-sqaaa-aaaam-qdtrq-cai"
-export const NOTIFICATIONS_CANISTER_ID = "epua2-tyaaa-aaaam-qdtsa-cai"
+export const LEARNING_ANALYTICS_CANISTER_ID = "epua2-tyaaa-aaaam-qdtsa-cai"
+export const NOTIFICATIONS_CANISTER_ID = "eivgo-6aaaa-aaaam-qdtsq-cai"
 export const RECOMMENDATIONS_CANISTER_ID = "be2us-64aaa-aaaaa-qaabq-cai" // Update this after deployment
 export const SESSIONS_CANISTER_ID = "br5f7-7uaaa-aaaaa-qaaca-cai"
-export const SOCIAL_CANISTER_ID = "e5sxd-7iaaa-aaaam-qdtra-cai"
+export const SOCIAL_CANISTER_ID = "ekhd5-baaaa-aaaac-qaitq-cai"
 export const USER_PROFILE_CANISTER_ID = "b77ix-eeaaa-aaaaa-qaada-cai"
 
 // Not needed for mainnet but keeping for reference

@@ -14,6 +14,16 @@ const kalam = Kalam({
   variable: '--font-kalam'
 })
 
+// Viewport configuration
+export const viewport = {
+  themeColor: '#ffffff',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+}
+
 export const metadata: Metadata = {
   title: 'PeerVerse - Learn Together, Grow Forever',
   description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
@@ -27,7 +37,6 @@ export const metadata: Metadata = {
     ],
   },
   manifest: '/site.webmanifest',
-  themeColor: '#ffffff',
   openGraph: {
     title: 'PeerVerse - Learn Together, Grow Forever',
     description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',

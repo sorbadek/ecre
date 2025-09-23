@@ -1,6 +1,6 @@
 "use strict";
 exports.__esModule = true;
-exports.metadata = void 0;
+exports.metadata = exports.viewport = void 0;
 var google_1 = require("next/font/google");
 var google_2 = require("next/font/google");
 require("./globals.css");
@@ -14,6 +14,15 @@ var kalam = google_2.Kalam({
     weight: ['300', '400', '700'],
     variable: '--font-kalam'
 });
+// Viewport configuration
+exports.viewport = {
+    themeColor: '#ffffff',
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+    viewportFit: 'cover'
+};
 exports.metadata = {
     title: 'PeerVerse - Learn Together, Grow Forever',
     description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
@@ -27,7 +36,6 @@ exports.metadata = {
         ]
     },
     manifest: '/site.webmanifest',
-    themeColor: '#ffffff',
     openGraph: {
         title: 'PeerVerse - Learn Together, Grow Forever',
         description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',

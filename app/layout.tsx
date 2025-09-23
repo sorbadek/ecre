@@ -28,13 +28,9 @@ export const metadata: Metadata = {
   title: 'PeerVerse - Learn Together, Grow Forever',
   description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
   icons: {
-    icon: [
-      { url: '/favicon.ico', sizes: 'any' },
-      { url: '/icon.png', type: 'image/png', sizes: '512x512' },
-    ],
-    apple: [
-      { url: '/apple-icon.png', type: 'image/png', sizes: '180x180' },
-    ],
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+    apple: '/apple-icon.png',
   },
   manifest: '/site.webmanifest',
   openGraph: {

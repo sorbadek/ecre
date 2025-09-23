@@ -5,53 +5,71 @@ import Image from "next/image"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { BookOpen, Users, Zap, ArrowRight, Play, Target } from "lucide-react"
+import { BookOpen, Users, Zap, ArrowRight, Play, X, MessageCircle, Award, GraduationCap } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 
 const features = [
   {
     id: "01",
-    title: "Create Your Profile & Connect",
+    title: "🎥 Live Sessions",
     description:
-      "Sign up and build your unique PeerVerse profile, showcasing your interests and what you're looking to learn. Connect with like-minded peers and start your learning journey together.",
+      "Join real-time, interactive classes hosted by educators and experts. Participate in live discussions, workshops, and tutorials with direct peer-to-peer interaction.",
     icon: Users,
     color: "from-blue-500 to-cyan-500",
-    mockupContent: "Profile Setup",
+    mockupContent: "Join Live Session",
   },
   {
     id: "02",
-    title: "Discover & Learn Together",
+    title: "📚 Micro-Classes",
     description:
-      "Explore courses, join interactive sessions, and attend live workshops. PeerVerse's smart matching helps you discover new friends, collaborators, or even your perfect mentor.",
+      "Access bite-sized learning modules designed for quick consumption. Learn at your own pace with focused, topic-specific content created by educators worldwide.",
     icon: BookOpen,
     color: "from-purple-500 to-pink-500",
-    mockupContent: "Course Discovery",
+    mockupContent: "Browse Micro-Classes",
   },
   {
     id: "03",
-    title: "Earn XP & Level Up",
+    title: "❓ Community Q&A",
     description:
-      "Once your account is active, you'll receive a unique referral code. Share this code with your network and watch them join the PeerVerse community. Every successful referral earns you rewards!",
-    icon: Zap,
+      "Ask questions and get answers from the community. Share your knowledge, upvote helpful responses, and build your reputation as a trusted contributor.",
+    icon: MessageCircle,
     color: "from-yellow-500 to-orange-500",
-    mockupContent: "XP Dashboard",
+    mockupContent: "Ask a Question",
   },
   {
     id: "04",
-    title: "Learn & Grow",
+    title: "⭐ Reputation System",
     description:
-      "For every new user who signs up using your referral code and activates their account, you earn a percentage (5%-10%) from their activation fee. The more you refer, the more you earn!",
-    icon: Target,
+      "Earn reputation points through quality contributions. Your reputation grows as you help others and create valuable content, establishing your credibility in the community.",
+    icon: Award,
     color: "from-green-500 to-emerald-500",
-    mockupContent: "Learning Progress",
+    mockupContent: "View Reputation",
+  },
+  {
+    id: "05",
+    title: "🎓 On-Chain Credentials",
+    description:
+      "Earn verifiable credentials for your achievements. These blockchain-based certificates prove your skills and can be shared with employers or across platforms.",
+    icon: GraduationCap,
+    color: "from-indigo-500 to-purple-600",
+    mockupContent: "View Credentials",
+  },
+  {
+    id: "06",
+    title: "✨ XP System",
+    description:
+      "Earn XP by learning and contributing. Spend XP to access premium content and features, creating a dynamic economy that rewards active participation.",
+    icon: Zap,
+    color: "from-pink-500 to-rose-500",
+    mockupContent: "Check XP Balance",
   },
 ]
 
 export default function FeaturesPage() {
   const { login, loading, user } = useAuth()
   const [watermarkData, setWatermarkData] = useState<Array<{ top: string; left: string }>>([])
+  const [showVideo, setShowVideo] = useState(false)
 
-  // Generate diagonal watermark positions
   useEffect(() => {
     const generateDiagonalWatermarkStyles = () => {
       const watermarks = []
@@ -157,10 +175,34 @@ export default function FeaturesPage() {
             variant="outline"
             size="lg"
             className="px-8 py-4 rounded-full text-lg bradley-hand-bold border-2 border-purple-600 text-purple-600 hover:bg-purple-600 hover:text-white transition-all duration-300 bg-transparent"
-            onClick={() => window.open("https://youtu.be/r5s7nD_XO0M?si=w1Xa1AOI-4e4I-nr", "_blank")}
+            onClick={() => setShowVideo(!showVideo)}
           >
             <Play className="mr-2 h-5 w-5" /> Watch your journey through PeerVerse
           </Button>
+
+          {/* Embedded YouTube Video */}
+          {showVideo && (
+            <div className="mt-8 relative">
+              <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl max-w-4xl mx-auto">
+                <button
+                  onClick={() => setShowVideo(false)}
+                  className="absolute top-4 right-4 z-10 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                <iframe
+                  width="100%"
+                  height="450"
+                  src="https://www.youtube.com/embed/Ewq-FKNKqwQ"
+                  title="PeerVerse Journey"
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  className="w-full"
+                ></iframe>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -174,7 +216,9 @@ export default function FeaturesPage() {
             return (
               <div key={feature.id} className="mb-32">
                 <div
-                  className={`grid grid-cols-1 lg:grid-cols-2 gap-16 items-center ${isEven ? "" : "lg:grid-flow-col-dense"}`}
+                  className={`grid grid-cols-1 lg:grid-cols-2 gap-16 items-center ${
+                    isEven ? "" : "lg:grid-flow-col-dense"
+                  }`}
                 >
                   {/* Text Content */}
                   <div className={`${isEven ? "" : "lg:col-start-2"}`}>
@@ -188,7 +232,9 @@ export default function FeaturesPage() {
                       {feature.title}
                     </h2>
 
-                    <p className="text-lg text-gray-700 mb-8 bradley-hand leading-relaxed">{feature.description}</p>
+                    <p className="text-lg text-gray-700 mb-8 bradley-hand leading-relaxed">
+                      {feature.description}
+                    </p>
                   </div>
 
                   {/* Mockup Card */}
@@ -242,7 +288,8 @@ export default function FeaturesPage() {
                         size="lg"
                         className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-8 py-4 rounded-full text-lg bradley-hand-bold"
                       >
-                        {loading ? "Connecting..." : "Join PeerVerse Now"} <ArrowRight className="ml-2 h-5 w-5" />
+                        {loading ? "Connecting..." : "Join PeerVerse Now"}{" "}
+                        <ArrowRight className="ml-2 h-5 w-5" />
                       </Button>
                     )}
                   </div>
@@ -288,7 +335,8 @@ export default function FeaturesPage() {
                 size="lg"
                 className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-8 py-4 rounded-full text-lg bradley-hand-bold"
               >
-                {loading ? "Connecting..." : "Join PeerVerse Today"} <ArrowRight className="ml-2 h-5 w-5" />
+                {loading ? "Connecting..." : "Join PeerVerse Today"}{" "}
+                <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             )}
           </div>
@@ -297,7 +345,9 @@ export default function FeaturesPage() {
 
       {/* Footer */}
       <footer className="relative z-10 text-center py-8 border-t border-gray-200 bg-white/50 backdrop-blur-sm">
-        <p className="text-gray-500 text-sm bradley-hand">© 2024 Peerverse. Built on the Internet Computer Protocol.</p>
+        <p className="text-gray-500 text-sm bradley-hand">
+          &copy; 2024 Peerverse. Built on the Internet Computer Protocol.
+        </p>
       </footer>
     </div>
   )

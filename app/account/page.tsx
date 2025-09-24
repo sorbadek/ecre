@@ -1,9 +1,9 @@
 'use client'
 
 import * as React from 'react'
-import { RouteGuard } from '@/components/route-guard'
-import AccountProfile from '@/components/account-profile'
-import WatermarkBackground from '@/components/watermark-bg'
+import { RouteGuard } from '../../components/route-guard'
+import AccountProfile from '../../components/account-profile'
+import WatermarkBackground from '../../components/watermark-bg'
 
 export default function AccountPage() {
   return (

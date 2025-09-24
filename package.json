@@ -9,6 +9,9 @@
     "start": "next start"
   },
   "dependencies": {
+    "next": "14.2.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "@ant-design/icons": "^6.0.2",
     "@dfinity/agent": "latest",
     "@dfinity/auth-client": "latest",

@@ -14,6 +14,21 @@ const nextConfig = {
   pageExtensions: ['tsx', 'ts', 'jsx', 'js'],
   basePath: '',
   
+  // Enable React strict mode
+  reactStrictMode: true,
+  
+  // Enable SWC minification
+  swcMinify: true,
+  
+  // Disable source maps in production
+  productionBrowserSourceMaps: false,
+  
+  // Enable webpack optimizations
+  webpack: (config, { isServer }) => {
+    // Add any webpack configurations here
+    return config;
+  },
+  
   async rewrites() {
     // Only enable rewrites in development
     if (process.env.NODE_ENV !== 'development') {

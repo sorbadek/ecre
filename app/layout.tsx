@@ -19,8 +19,8 @@ export const viewport = {
   themeColor: '#ffffff',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  maximumScale: 5,
+  userScalable: true,
   viewportFit: 'cover',
 }
 
@@ -54,7 +54,6 @@ export const metadata: Metadata = {
     description: 'Connect with peers, share knowledge, and unlock your potential in our vibrant learning community',
     images: ['/og-image.jpg'],
   },
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=5',
   metadataBase: new URL('https://peer-verse.app'),
   alternates: {
     canonical: '/',
